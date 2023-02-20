@@ -1,19 +1,22 @@
-from multiprocessing.connection import Listener, Client
 
 # Notes:
 # 1. SDL_UpdateWindowSurface is the SW equvalient to SDL_RenderPresent for HW rendering
 # 2. Consider: https://stackoverflow.com/questions/1597289/hide-console-in-c-system-function-win
 
-
 URL = 'localhost'
 PORT = 6000
 
+OPCODE_CLEAR = 'clear'
+OPCODE_IMAGE = 'image'
+OPCODE_CLOSE = 'close'
 
-def send_marquee_command(command):
+
+def send_marquee_command(*command):
     """
-    Send marquee command, used by clients who
-    wants to interact with the marquee screen
+    Send command to marquee process. Used by clients (including other
+    processes) who wants to interact with the marquee screen
     """
+    from multiprocessing.connection import Client
     try:
         address = (URL, PORT)
         with Client(address) as connection:
@@ -170,62 +173,91 @@ def process_marquee_command(command, renderer):
     """
     print(f'Command: {command}')
 
-    if command == 'clear':
+    opcode = command[0]
+
+    if opcode == OPCODE_CLEAR:
         clear_renderer(renderer)
 
-    elif command == 'close':
+    elif opcode == OPCODE_CLOSE:
         return False
 
-    elif command.startswith('image '):
-        im_path = command[6:]
-        show_image(renderer, im_path, 0.5)
+    elif opcode == OPCODE_IMAGE:
+        show_image(renderer, command[1], 0.5)
 
     else:
-        print(f'Invalid command: {command}')
+        print(f'Invalid command opcode: {opcode}')
 
     return True
 
 
-def termination_requested(events):
+def process_events(events):
     """
     Return true if termination was requested
     """
     for e in events:
         if e.type == sdl2.SDL_QUIT:
-            return True
+            return False
         if e.type == sdl2.SDL_KEYDOWN:
             if e.key.keysym.sym == sdl2.SDLK_q:
-                return True
-    return False
+                return False
+    return True
+
+
+def run_command_listener(command_queue):
+    """
+    Run the command listener
+    """
+    address = (URL, PORT)
+    with Listener(address) as listener:
+        listener._listener._socket.settimeout(0.5)  # Hacky
+        while True:
+            try:
+                with listener.accept() as connection:
+                    command = connection.recv()
+                    command_queue.put(command)
+                    if command[0] == OPCODE_CLOSE:
+                        break
+            except TimeoutError:
+                continue
 
 
 def main():
     """
     Main entry point
     """
+
+    # Create marquee window
     window, renderer = open_marquee_window()
 
-    address = (URL, PORT)
-    with Listener(address) as listener:
+    # Create a command queue that we share between threads
+    command_queue = Queue()
 
-        listener._listener._socket.settimeout(0.5)  # Hacky
+    # Start the command listener thread
+    command_listener_thread = Thread(
+        target=run_command_listener,
+        name='ipc listener thread',
+        args=(command_queue,),
+        daemon=True)
+    command_listener_thread.start()
 
-        while True:
+    # Enter main loop
+    while True:
 
-            # Did we get any termination events?
-            events = sdl2.ext.get_events()
-            if termination_requested(events):
+        # Process events
+        events = sdl2.ext.get_events()
+        if not process_events(events):
+            send_marquee_command(OPCODE_CLOSE)
+
+        # Process commands
+        if not command_queue.empty():
+            command = command_queue.get(block=False)
+            if not process_marquee_command(command, renderer):
                 break
 
-            # Listen for incoming commands
-            try:
-                with listener.accept() as connection:
-                    command = connection.recv()
-                    if not process_marquee_command(command, renderer):
-                        break
-            except TimeoutError:
-                continue
+    # Wait for command listener thread to finish
+    command_listener_thread.join()
 
+    # Close marquee window and cleanup
     close_marquee_window(window, renderer)
 
 
@@ -234,4 +266,7 @@ if __name__ == "__main__":
     import sdl2.ext
     import time
     from ctypes import c_int, byref
+    from threading import Thread
+    from queue import Queue
+    from multiprocessing.connection import Listener
     main()
