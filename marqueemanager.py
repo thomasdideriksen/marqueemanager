@@ -3,6 +3,8 @@
 # 1. SDL_UpdateWindowSurface is the SW equvalient to SDL_RenderPresent for HW rendering
 # 2. Consider: https://stackoverflow.com/questions/1597289/hide-console-in-c-system-function-win
 
+from abc import ABC, abstractmethod
+
 URL = 'localhost'
 PORT = 6000
 
@@ -26,23 +28,107 @@ def send_marquee_command(*command):
         return False
 
 
-class Animation(object):
+class ValueAnimation(object):
     """
-    Simple animation object
+    Animates a single numerical value
     """
-    def __init__(self, begin, end, duration):
+    def __init__(self, begin, end, duration, ease=False):
         self.begin = begin
         self.end = end
         self.duration = duration
+        self.ease = ease
         self.t0 = time.time()
 
     def evaluate(self):
         dt = time.time() - self.t0
         if dt < self.duration:
-            ratio = dt / self.duration
-            return self.begin + (self.end - self.begin) * ratio, False
+            r = dt / self.duration
+            if self.ease:
+                r = r - 1.0
+                r = -(r * r * r * r - 1.0)
+            return self.begin + (self.end - self.begin) * r, False
         else:
             return self.end, True
+
+
+class VisualEffect(ABC):
+    """
+    Visual effect base class
+    """
+    @abstractmethod
+    def render(self, renderer):
+        pass
+
+    @abstractmethod
+    def stop(self):
+        pass
+
+    @abstractmethod
+    def is_stopped(self):
+        return False
+
+    @abstractmethod
+    def cleanup(self):
+        pass
+
+
+class DisplayImageVisualEffect(VisualEffect):
+    """
+    Visual effect for displaying an image
+    """
+
+    def __init__(self, renderer, image_path):
+        self.surface = sdl2.ext.image.load_img(image_path)
+        self.texture = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
+        self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
+        self.texture_src_rect = sdl2.SDL_Rect(x=0, y=0, w=self.surface.w, h=self.surface.h)
+        self.stopping = False
+        self.stopped = False
+        self.translate_anim = ValueAnimation(0.0, 200.0, 3.0)
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+        rw, rh = get_renderer_dimensions(renderer)
+
+        sw = float(self.surface.w)
+        sh = float(self.surface.h)
+
+        sx = rw / sw
+        sy = rh / sh
+        s = min(sx, sy)
+        s = min(1.0, s)
+
+        translate_x, translate_anim_done = self.translate_anim.evaluate()
+        if translate_anim_done:
+            self.translate_anim = ValueAnimation(translate_x, translate_x - 200, 3, ease=True)
+        translate_x = 0
+
+
+        dw = sw * s
+        dh = sh * s
+        dx = (rw - dw) * 0.5 + translate_x
+        dy = (rh - dh) * 0.5
+        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+
+        value, fade_animation_done = self.fade_anim.evaluate()
+
+        sdl2.SDL_SetTextureAlphaMod(self.texture, int(value * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, self.texture, self.texture_src_rect, dst_rect)
+
+        if self.stopping and fade_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        sdl2.SDL_DestroyTexture(self.texture)
+        sdl2.SDL_FreeSurface(self.surface)
 
 
 def get_marquee_display_bounds():
@@ -88,9 +174,10 @@ def open_marquee_window():
         window, -1,
         sdl2.render.SDL_RENDERER_ACCELERATED | sdl2.SDL_RENDERER_PRESENTVSYNC)
 
+    sdl2.SDL_SetHint(sdl2.SDL_HINT_RENDER_SCALE_QUALITY, b'best')
     sdl2.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
-
-    clear_renderer(renderer)
+    sdl2.SDL_RenderClear(renderer)
+    sdl2.SDL_RenderPresent(renderer)
 
     return window, renderer
 
@@ -114,60 +201,7 @@ def get_renderer_dimensions(renderer):
     return w.value, h.value
 
 
-def clear_renderer(renderer):
-    """
-    Clear renderer
-    """
-    sdl2.SDL_RenderClear(renderer)
-    sdl2.SDL_RenderPresent(renderer)
-
-
-def show_image(renderer, image_path, fade_duration):
-    """
-    Fade in image
-    """
-    surface = sdl2.ext.image.load_img(image_path)
-
-    sdl2.ext.renderer.set_texture_scale_quality('best')
-    tex = sdl2.SDL_CreateTextureFromSurface(renderer, surface)
-
-    rw, rh = get_renderer_dimensions(renderer)
-
-    sw = float(surface.w)
-    sh = float(surface.h)
-
-    sx = rw / sw
-    sy = rh / sh
-    s = min(sx, sy)
-    s = min(1.0, s)
-
-    src_rect = sdl2.SDL_Rect(x=0, y=0, w=surface.w, h=surface.h)
-
-    dw = int(surface.w * s)
-    dh = int(surface.h * s)
-    dx = int((rw - dw) * 0.5)
-    dy = int((rh - dh) * 0.5)
-    dst_rect = sdl2.SDL_Rect(x=dx, y=dy, w=dw, h=dh)
-
-    fade_anim = Animation(0.0, 1.0, fade_duration)
-
-    while True:
-
-        value, complete = fade_anim.evaluate()
-
-        sdl2.SDL_RenderClear(renderer)
-        sdl2.SDL_SetTextureAlphaMod(tex, int(value * 255.0))
-        sdl2.SDL_RenderCopy(renderer, tex, src_rect, dst_rect)
-        sdl2.SDL_RenderPresent(renderer)
-
-        if complete:
-            break
-
-    sdl2.SDL_DestroyTexture(tex)
-    sdl2.SDL_FreeSurface(surface)
-
-
-def process_marquee_command(command, renderer):
+def process_marquee_command(command, render_manager):
     """
     Process marquee command
     """
@@ -176,13 +210,14 @@ def process_marquee_command(command, renderer):
     opcode = command[0]
 
     if opcode == OPCODE_CLEAR:
-        clear_renderer(renderer)
+        render_manager.stop_all_visual_effects()
 
     elif opcode == OPCODE_CLOSE:
         return False
 
     elif opcode == OPCODE_IMAGE:
-        show_image(renderer, command[1], 0.5)
+        effect = DisplayImageVisualEffect(render_manager.renderer, command[1])
+        render_manager.add_visual_effect(effect)
 
     else:
         print(f'Invalid command opcode: {opcode}')
@@ -221,6 +256,40 @@ def run_command_listener(command_queue):
                 continue
 
 
+class RenderManager(object):
+
+    def __init__(self, renderer):
+        self.visual_effects = []
+        self.renderer = renderer
+
+    def add_visual_effect(self, effect):
+        self.visual_effects.append(effect)
+
+    def stop_all_visual_effects(self):
+        for effect in self.visual_effects:
+            effect.stop()
+
+    def cleanup(self):
+        for effect in self.visual_effects:
+            effect.cleanup()
+
+    def render(self):
+
+        sdl2.SDL_RenderClear(self.renderer)
+
+        effects_to_remove = []
+        for effect in self.visual_effects:
+            effect.render(self.renderer)
+            if effect.is_stopped():
+                effect.cleanup()
+                effects_to_remove.append(effect)
+
+        for effect in effects_to_remove:
+            self.visual_effects.remove(effect)
+
+        sdl2.SDL_RenderPresent(self.renderer)
+
+
 def main():
     """
     Main entry point
@@ -240,6 +309,9 @@ def main():
         daemon=True)
     command_listener_thread.start()
 
+    # Create render manager
+    render_manager = RenderManager(renderer)
+
     # Enter main loop
     while True:
 
@@ -251,8 +323,14 @@ def main():
         # Process commands
         if not command_queue.empty():
             command = command_queue.get(block=False)
-            if not process_marquee_command(command, renderer):
+            if not process_marquee_command(command, render_manager):
                 break
+
+        # Render
+        render_manager.render()
+
+    # Cleanup render resources
+    render_manager.cleanup()
 
     # Wait for command listener thread to finish
     command_listener_thread.join()
