@@ -64,6 +64,33 @@ class ValueAnimation(object):
             return self.end, True
 
 
+class Image(object):
+
+    def __init__(self, renderer, path):
+        self.surface = sdl2.ext.image.load_img(path)
+        self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
+
+    def cleanup(self):
+        sdl2.SDL_DestroyTexture(self.tex)
+        sdl2.SDL_FreeSurface(self.surface)
+
+    @property
+    def texture(self):
+        return self.tex
+
+    @property
+    def rect(self):
+        return sdl2.SDL_Rect(x=0, y=0, w=self.surface.w, h=self.surface.h)
+
+    @property
+    def width(self):
+        return self.surface.w
+
+    @property
+    def height(self):
+        return self.surface.h
+
+
 class VisualEffect(ABC):
     """
     Visual effect base class
@@ -91,13 +118,10 @@ class DisplayImageVisualEffect(VisualEffect):
     """
 
     def __init__(self, renderer, image_path):
-        self.surface = sdl2.ext.image.load_img(image_path)
-        self.texture = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
+        self.image = Image(renderer, image_path)
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
-        self.texture_src_rect = sdl2.SDL_Rect(x=0, y=0, w=self.surface.w, h=self.surface.h)
         self.stopping = False
         self.stopped = False
-        self.translate_anim = ValueAnimation(0.0, 200.0, 3.0)
 
     def stop(self):
         if not self.stopping:
@@ -111,37 +135,30 @@ class DisplayImageVisualEffect(VisualEffect):
     def render(self, renderer):
         rw, rh = get_renderer_dimensions(renderer)
 
-        sw = float(self.surface.w)
-        sh = float(self.surface.h)
+        sw = float(self.image.width)
+        sh = float(self.image.height)
 
         sx = rw / sw
         sy = rh / sh
-        s = min(sx, sy)
-        s = min(1.0, s)
-
-        translate_x, translate_anim_done = self.translate_anim.evaluate()
-        if translate_anim_done:
-            self.translate_anim = ValueAnimation(translate_x, translate_x - 200, 3, ease=True)
-        translate_x = 0
-
+        s = min(sx, sy, 1.0)
 
         dw = sw * s
         dh = sh * s
-        dx = (rw - dw) * 0.5 + translate_x
+        dx = (rw - dw) * 0.5
         dy = (rh - dh) * 0.5
+
         dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
         value, fade_animation_done = self.fade_anim.evaluate()
 
-        sdl2.SDL_SetTextureAlphaMod(self.texture, int(value * 255.0))
-        sdl2.SDL_RenderCopyF(renderer, self.texture, self.texture_src_rect, dst_rect)
+        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(value * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
 
         if self.stopping and fade_animation_done:
             self.stopped = True
 
     def cleanup(self):
-        sdl2.SDL_DestroyTexture(self.texture)
-        sdl2.SDL_FreeSurface(self.surface)
+        self.image.cleanup()
 
 
 def get_marquee_display_bounds():
