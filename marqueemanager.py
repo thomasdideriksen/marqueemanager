@@ -6,6 +6,7 @@ READY_MSG = 'marquee ready'
 
 OPCODE_CLEAR = 'clear'
 OPCODE_IMAGE = 'image'
+OPCODE_SCROLL_IMAGES = 'scrollimages'
 OPCODE_CLOSE = 'close'
 
 
@@ -91,7 +92,7 @@ class Image(object):
         return self.surface.h
 
 
-class VisualEffect(ABC):
+class Effect(ABC):
     """
     Visual effect base class
     """
@@ -112,7 +113,7 @@ class VisualEffect(ABC):
         pass
 
 
-class DisplayImageVisualEffect(VisualEffect):
+class DisplayImageEffect(Effect):
     """
     Visual effect for displaying an image
     """
@@ -159,6 +160,54 @@ class DisplayImageVisualEffect(VisualEffect):
 
     def cleanup(self):
         self.image.cleanup()
+
+
+class ScrollingImagesEffect(Effect):
+
+    def __init__(self, renderer, image_paths):
+
+        self.images = [Image(renderer, path) for path in image_paths]
+        self.stopping = False
+        self.stopped = False
+        self.fade_anim = ValueAnimation(1.0, 1.0, 0.0)
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+        rw, rh = get_renderer_dimensions(renderer)
+
+        sw = float(self.image.width)
+        sh = float(self.image.height)
+
+        sx = rw / sw
+        sy = rh / sh
+        s = min(sx, sy, 1.0)
+
+        dw = sw * s
+        dh = sh * s
+        dx = (rw - dw) * 0.5
+        dy = (rh - dh) * 0.5
+
+        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+
+        value, fade_animation_done = self.fade_anim.evaluate()
+
+        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(value * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
+
+        if self.stopping and fade_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        for image in self.images:
+            image.cleanup()
 
 
 def get_marquee_display_bounds():
@@ -246,7 +295,11 @@ def process_marquee_command(command, render_manager):
         return False
 
     elif opcode == OPCODE_IMAGE:
-        effect = DisplayImageVisualEffect(render_manager.renderer, command[1])
+        effect = DisplayImageEffect(render_manager.renderer, command[1])
+        render_manager.add_visual_effect(effect)
+
+    elif opcode == OPCODE_SCROLL_IMAGES:
+        effect = ScrollingImagesEffect(render_manager.renderer, command[1, :])
         render_manager.add_visual_effect(effect)
 
     else:
@@ -333,7 +386,7 @@ def main():
     # Start the command listener thread
     command_listener_thread = Thread(
         target=run_command_listener,
-        name='ipc listener thread',
+        name='Marquee command listener thread',
         args=(command_queue,),
         daemon=True)
     command_listener_thread.start()
