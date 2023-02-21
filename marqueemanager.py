@@ -1,16 +1,29 @@
-
-# Notes:
-# 1. SDL_UpdateWindowSurface is the SW equvalient to SDL_RenderPresent for HW rendering
-# 2. Consider: https://stackoverflow.com/questions/1597289/hide-console-in-c-system-function-win
-
 from abc import ABC, abstractmethod
 
 URL = 'localhost'
 PORT = 6000
+READY_MSG = 'marquee ready'
 
 OPCODE_CLEAR = 'clear'
 OPCODE_IMAGE = 'image'
 OPCODE_CLOSE = 'close'
+
+
+def start_marquee():
+    """
+    Start the marquee process
+    """
+    import subprocess
+
+    process = subprocess.Popen(
+        ['pythonw', __file__],
+        creationflags=subprocess.DETACHED_PROCESS,
+        stdout=subprocess.PIPE)
+
+    while True:
+        line = process.stdout.readline().decode('utf8').strip()
+        if line == READY_MSG:
+            break
 
 
 def send_marquee_command(*command):
@@ -294,7 +307,6 @@ def main():
     """
     Main entry point
     """
-
     # Create marquee window
     window, renderer = open_marquee_window()
 
@@ -311,6 +323,11 @@ def main():
 
     # Create render manager
     render_manager = RenderManager(renderer)
+
+    # A parent process may listen for this (i.e. via a pipe) to
+    # know when the marquee window has been created
+    sys.stdout.write(f'{READY_MSG}\r\n')
+    sys.stdout.flush()
 
     # Enter main loop
     while True:
@@ -340,6 +357,7 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
     import sdl2
     import sdl2.ext
     import time
