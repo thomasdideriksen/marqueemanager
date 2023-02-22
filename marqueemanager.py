@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import time
 
 URL = 'localhost'
 PORT = 6000
@@ -46,15 +47,20 @@ class ValueAnimation(object):
     """
     Animates a single numerical value
     """
-    def __init__(self, begin, end, duration, ease=False):
+    def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False):
         self.begin = begin
         self.end = end
         self.duration = duration
         self.ease = ease
-        self.t0 = time.time()
+        self.repeat = repeat
+        self.start_time = time.time() if start_time is None else start_time
 
     def evaluate(self):
-        dt = time.time() - self.t0
+        dt = time.time() - self.start_time
+        if dt < 0:
+            return self.begin, False
+        if self.repeat and dt > self.duration:
+            dt %= self.duration
         if dt < self.duration:
             r = dt / self.duration
             if self.ease:
@@ -68,8 +74,9 @@ class ValueAnimation(object):
 class Image(object):
 
     def __init__(self, renderer, path):
-        self.surface = sdl2.ext.image.load_img(path)
+        self.surface = sdl2.ext.image.load_img(path, as_argb=True)
         self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
+        sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
 
     def cleanup(self):
         sdl2.SDL_DestroyTexture(self.tex)
@@ -164,45 +171,76 @@ class DisplayImageEffect(Effect):
 
 class ScrollingImagesEffect(Effect):
 
-    def __init__(self, renderer, image_paths):
+    def __init__(self, renderer, image_paths, pixels_per_second=400):
 
+        self.TOP_BOTTOM_MARGIN = 8
+        self.IMAGE_IMAGE_MARGIN = 32
+
+        rw, rh = get_renderer_dimensions(renderer)
         self.images = [Image(renderer, path) for path in image_paths]
+        self.animations = []
+        self.rects = []
+        self.full_width = 0.0
+
+        for image in self.images:
+
+            sx = rw / float(image.width)
+            sy = (rh - (self.TOP_BOTTOM_MARGIN * 2)) / float(image.height)
+            s = min(sx, sy)
+
+            w = float(image.width) * s
+            h = float(image.height) * s
+            y = (rh - h) * 0.5
+
+            rect = sdl2.SDL_FRect(x=0, y=y, w=w, h=h)
+            self.rects.append(rect)
+
+            self.full_width += rect.w + self.IMAGE_IMAGE_MARGIN
+
+        pos0 = -self.full_width
+        pos1 = (math.ceil(rw / self.full_width) + 1) * self.full_width
+        self.scroll_anim = ValueAnimation(pos0, pos1, (pos1 - pos0) / pixels_per_second, repeat=True)
+
+        self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
         self.stopping = False
         self.stopped = False
-        self.fade_anim = ValueAnimation(1.0, 1.0, 0.0)
 
     def stop(self):
         if not self.stopping:
             self.stopping = True
-            current_value, _ = self.fade_anim.evaluate()
-            self.fade_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+            current_value, _ = self.alpha_anim.evaluate()
+            self.alpha_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
 
     def is_stopped(self):
         return self.stopped
 
+    def draw_image(self, renderer, idx, alpha, scroll):
+        image = self.images[idx]
+        rect = self.rects[idx]
+        rect.x = scroll
+        sdl2.SDL_SetTextureAlphaMod(image.texture, int(alpha * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, image.texture, image.rect, rect)
+
     def render(self, renderer):
+
         rw, rh = get_renderer_dimensions(renderer)
 
-        sw = float(self.image.width)
-        sh = float(self.image.height)
+        scroll_val, _ = self.scroll_anim.evaluate()
+        alpha_val, alpha_anim_done = self.alpha_anim.evaluate()
 
-        sx = rw / sw
-        sy = rh / sh
-        s = min(sx, sy, 1.0)
 
-        dw = sw * s
-        dh = sh * s
-        dx = (rw - dw) * 0.5
-        dy = (rh - dh) * 0.5
+        pos = scroll_val
+        repeat_behind = math.ceil(pos / self.full_width)
 
-        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+        pos = scroll_val - (repeat_behind * self.full_width)
 
-        value, fade_animation_done = self.fade_anim.evaluate()
+        while pos < rw:
+            for idx, _ in enumerate(self.images):
+                self.draw_image(renderer, idx, alpha_val, pos)
+                rect = self.rects[idx]
+                pos += rect.w + self.IMAGE_IMAGE_MARGIN
 
-        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(value * 255.0))
-        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
-
-        if self.stopping and fade_animation_done:
+        if self.stopping and alpha_anim_done:
             self.stopped = True
 
     def cleanup(self):
@@ -295,12 +333,17 @@ def process_marquee_command(command, render_manager):
         return False
 
     elif opcode == OPCODE_IMAGE:
-        effect = DisplayImageEffect(render_manager.renderer, command[1])
-        render_manager.add_visual_effect(effect)
+        image_path = Path(command[1])
+        if image_path.is_file():
+            effect = DisplayImageEffect(render_manager.renderer, command[1])
+            render_manager.add_visual_effect(effect)
 
     elif opcode == OPCODE_SCROLL_IMAGES:
-        effect = ScrollingImagesEffect(render_manager.renderer, command[1, :])
-        render_manager.add_visual_effect(effect)
+        scroll_speed = command[1]
+        image_paths = command[2:]
+        if all([Path(image_path).is_file() for image_path in image_paths]):
+            effect = ScrollingImagesEffect(render_manager.renderer, image_paths, scroll_speed)
+            render_manager.add_visual_effect(effect)
 
     else:
         print(f'Invalid command opcode: {opcode}')
@@ -430,9 +473,10 @@ if __name__ == "__main__":
     import sys
     import sdl2
     import sdl2.ext
-    import time
     from ctypes import c_int, byref
     from threading import Thread
     from queue import Queue
     from multiprocessing.connection import Listener
+    from pathlib import Path
+    import math
     main()
