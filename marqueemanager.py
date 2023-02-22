@@ -5,10 +5,10 @@ URL = 'localhost'
 PORT = 6000
 READY_MSG = 'marquee ready'
 
-OPCODE_CLEAR = 'clear'
-OPCODE_IMAGE = 'image'
-OPCODE_SCROLL_IMAGES = 'scrollimages'
-OPCODE_CLOSE = 'close'
+COMMAND_CLEAR = 'clear'
+COMMAND_SHOW_IMAGE = 'image'
+COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
+COMMAND_CLOSE = 'close'
 
 
 def start_marquee():
@@ -72,7 +72,9 @@ class ValueAnimation(object):
 
 
 class Image(object):
-
+    """
+    Small wrapper class for images
+    """
     def __init__(self, renderer, path):
         self.surface = sdl2.ext.image.load_img(path, as_argb=True)
         self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
@@ -101,7 +103,7 @@ class Image(object):
 
 class Effect(ABC):
     """
-    Visual effect base class
+    Effect base class
     """
     @abstractmethod
     def render(self, renderer):
@@ -122,9 +124,8 @@ class Effect(ABC):
 
 class DisplayImageEffect(Effect):
     """
-    Visual effect for displaying an image
+    Effect for displaying an image
     """
-
     def __init__(self, renderer, image_path):
         self.image = Image(renderer, image_path)
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
@@ -169,8 +170,10 @@ class DisplayImageEffect(Effect):
         self.image.cleanup()
 
 
-class ScrollingImagesEffect(Effect):
-
+class VerticalScrollImagesEffect(Effect):
+    """
+    Vertical image scrolling effect
+    """
     def __init__(self, renderer, image_paths, pixels_per_second=400):
 
         self.TOP_BOTTOM_MARGIN = 8
@@ -228,17 +231,18 @@ class ScrollingImagesEffect(Effect):
         scroll_val, _ = self.scroll_anim.evaluate()
         alpha_val, alpha_anim_done = self.alpha_anim.evaluate()
 
-
-        pos = scroll_val
-        repeat_behind = math.ceil(pos / self.full_width)
-
+        repeat_behind = math.ceil(scroll_val / self.full_width)
         pos = scroll_val - (repeat_behind * self.full_width)
 
-        while pos < rw:
+        done = False
+        while not done:
             for idx, _ in enumerate(self.images):
                 self.draw_image(renderer, idx, alpha_val, pos)
                 rect = self.rects[idx]
                 pos += rect.w + self.IMAGE_IMAGE_MARGIN
+                done = pos > rw
+                if done:
+                    break
 
         if self.stopping and alpha_anim_done:
             self.stopped = True
@@ -322,31 +326,27 @@ def process_marquee_command(command, render_manager):
     """
     Process marquee command
     """
-    print(f'Command: {command}')
 
-    opcode = command[0]
+    if command[0] == COMMAND_CLEAR:
+        render_manager.stop_all_effects()
 
-    if opcode == OPCODE_CLEAR:
-        render_manager.stop_all_visual_effects()
-
-    elif opcode == OPCODE_CLOSE:
+    elif command[0] == COMMAND_CLOSE:
         return False
 
-    elif opcode == OPCODE_IMAGE:
+    elif command[0] == COMMAND_SHOW_IMAGE:
         image_path = Path(command[1])
         if image_path.is_file():
             effect = DisplayImageEffect(render_manager.renderer, command[1])
-            render_manager.add_visual_effect(effect)
+            render_manager.add_effect(effect)
 
-    elif opcode == OPCODE_SCROLL_IMAGES:
-        scroll_speed = command[1]
+    elif command[0] == COMMAND_VERT_SCROLL_IMAGES:
         image_paths = command[2:]
         if all([Path(image_path).is_file() for image_path in image_paths]):
-            effect = ScrollingImagesEffect(render_manager.renderer, image_paths, scroll_speed)
-            render_manager.add_visual_effect(effect)
+            effect = VerticalScrollImagesEffect(render_manager.renderer, image_paths, pixels_per_second=command[1])
+            render_manager.add_effect(effect)
 
     else:
-        print(f'Invalid command opcode: {opcode}')
+        print(f'Invalid command: {command[0]}')
 
     return True
 
@@ -376,7 +376,7 @@ def run_command_listener(command_queue):
                 with listener.accept() as connection:
                     command = connection.recv()
                     command_queue.put(command)
-                    if command[0] == OPCODE_CLOSE:
+                    if command[0] == COMMAND_CLOSE:
                         break
             except TimeoutError:
                 continue
@@ -385,18 +385,18 @@ def run_command_listener(command_queue):
 class RenderManager(object):
 
     def __init__(self, renderer):
-        self.visual_effects = []
+        self.effects = []
         self.renderer = renderer
 
-    def add_visual_effect(self, effect):
-        self.visual_effects.append(effect)
+    def add_effect(self, effect):
+        self.effects.append(effect)
 
-    def stop_all_visual_effects(self):
-        for effect in self.visual_effects:
+    def stop_all_effects(self):
+        for effect in self.effects:
             effect.stop()
 
     def cleanup(self):
-        for effect in self.visual_effects:
+        for effect in self.effects:
             effect.cleanup()
 
     def render(self):
@@ -404,14 +404,14 @@ class RenderManager(object):
         sdl2.SDL_RenderClear(self.renderer)
 
         effects_to_remove = []
-        for effect in self.visual_effects:
+        for effect in self.effects:
             effect.render(self.renderer)
             if effect.is_stopped():
                 effect.cleanup()
                 effects_to_remove.append(effect)
 
         for effect in effects_to_remove:
-            self.visual_effects.remove(effect)
+            self.effects.remove(effect)
 
         sdl2.SDL_RenderPresent(self.renderer)
 
@@ -448,7 +448,7 @@ def main():
         # Process events
         events = sdl2.ext.get_events()
         if not process_events(events):
-            send_marquee_command(OPCODE_CLOSE)
+            send_marquee_command(COMMAND_CLOSE)
 
         # Process commands
         if not command_queue.empty():
