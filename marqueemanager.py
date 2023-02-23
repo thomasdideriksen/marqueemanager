@@ -11,6 +11,7 @@ COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
 COMMAND_CLOSE = 'close'
+COMMAND_NOOP = 'noop'
 
 
 def start_marquee():
@@ -18,6 +19,14 @@ def start_marquee():
     Start the marquee process
     """
     import subprocess
+
+    if send_marquee_command(COMMAND_NOOP):
+        # This checks if a marquee process is already running. We only
+        # allow one marquee process to run at the time. This only works
+        # because we're synchronizing using the 'READY_MSG' (see below)
+        # which ensures that 'start_marquee' will not return before the
+        # command listener is ready
+        return False
 
     process = subprocess.Popen(
         ['pythonw', __file__],
@@ -28,6 +37,8 @@ def start_marquee():
         line = process.stdout.readline().decode('utf8').strip()
         if line == READY_MSG:
             break
+
+    return True
 
 
 def send_marquee_command(*command):
@@ -445,11 +456,14 @@ def process_marquee_command(command, render_manager):
     Process marquee command
     """
 
-    if command[0] == COMMAND_CLEAR:
-        render_manager.stop_all_effects()
-
-    elif command[0] == COMMAND_CLOSE:
+    if command[0] == COMMAND_CLOSE:
         return False
+
+    elif command[0] == COMMAND_NOOP:
+        pass
+
+    elif command[0] == COMMAND_CLEAR:
+        render_manager.stop_all_effects()
 
     elif command[0] == COMMAND_SHOW_IMAGE:
         image_path = Path(command[1])
@@ -477,6 +491,8 @@ def process_marquee_command(command, render_manager):
             g = command[2]
             b = command[3]
         render_manager.set_background_color(r, g, b)
+
+
 
     else:
         print(f'Invalid command: {command[0]}')
