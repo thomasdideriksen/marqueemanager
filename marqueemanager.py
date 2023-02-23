@@ -225,7 +225,7 @@ class HorizontalScrollImagesEffect(Effect):
     """
     Horizontal image scrolling effect
     """
-    def __init__(self, renderer, image_paths, pixels_per_second=400):
+    def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False):
 
         self.TOP_BOTTOM_MARGIN = 8
         self.IMAGE_IMAGE_MARGIN = 32
@@ -253,6 +253,8 @@ class HorizontalScrollImagesEffect(Effect):
 
         pos0 = -self.full_width
         pos1 = (math.ceil(rw / self.full_width) + 1) * self.full_width
+        if reverse:
+            pos0, pos1 = pos1, pos0
         self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / pixels_per_second, repeat=True)
 
         self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
@@ -372,7 +374,6 @@ class VerticalScrollImagesEffect(Effect):
             self.current_image_idx %= len(self.images)
             self.scroll_anim.restart()
 
-
         if self.stopping and alpha_anim_done:
             self.stopped = True
 
@@ -474,6 +475,7 @@ def process_marquee_command(command, render_manager):
     elif command[0] == COMMAND_HORZ_SCROLL_IMAGES:
         image_paths = command[2:]
         if all([Path(image_path).is_file() for image_path in image_paths]):
+            # TODO: Parameterize "reverse"
             effect = HorizontalScrollImagesEffect(render_manager.renderer, image_paths, pixels_per_second=command[1])
             render_manager.add_effect(effect)
 
