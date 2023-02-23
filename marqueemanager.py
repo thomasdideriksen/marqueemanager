@@ -29,7 +29,7 @@ def start_marquee():
         return False
 
     process = subprocess.Popen(
-        ['pythonw', __file__],
+        ['python', __file__],
         creationflags=subprocess.DETACHED_PROCESS,
         stdout=subprocess.PIPE)
 
@@ -491,11 +491,6 @@ def process_marquee_command(command, render_manager):
             g = command[2]
             b = command[3]
         render_manager.set_background_color(r, g, b)
-
-
-
-    else:
-        print(f'Invalid command: {command[0]}')
 
     return True
 
