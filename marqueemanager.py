@@ -7,7 +7,9 @@ READY_MSG = 'marquee ready'
 
 COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'image'
+COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
+COMMAND_BACKGROUND = 'background'
 COMMAND_CLOSE = 'close'
 
 
@@ -43,20 +45,36 @@ def send_marquee_command(*command):
         return False
 
 
-class ValueAnimation(object):
+class Animation(ABC):
+
+    @abstractmethod
+    def restart(self, start_time=None):
+        pass
+
+    @abstractmethod
+    def evaluate(self, eval_time=None):
+        pass
+
+
+class ValueAnimation(Animation):
     """
     Animates a single numerical value
     """
     def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False):
+        assert duration >= 0.0
         self.begin = begin
         self.end = end
         self.duration = duration
         self.ease = ease
         self.repeat = repeat
+        self.restart(start_time)
+
+    def restart(self, start_time=None):
         self.start_time = time.time() if start_time is None else start_time
 
-    def evaluate(self):
-        dt = time.time() - self.start_time
+    def evaluate(self, eval_time=None):
+        eval_time = time.time() if eval_time is None else eval_time
+        dt = eval_time - self.start_time
         if dt < 0:
             return self.begin, False
         if self.repeat and dt > self.duration:
@@ -69,6 +87,28 @@ class ValueAnimation(object):
             return self.begin + (self.end - self.begin) * r, False
         else:
             return self.end, True
+
+
+class ColorAnimation(Animation):
+
+    def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False):
+        assert isinstance(begin, tuple) and len(begin) == 3
+        assert isinstance(end, tuple) and len(end) == 3
+        self.r = ValueAnimation(begin[0], end[0], duration, start_time, ease, repeat)
+        self.g = ValueAnimation(begin[1], end[1], duration, start_time, ease, repeat)
+        self.b = ValueAnimation(begin[2], end[2], duration, start_time, ease, repeat)
+
+    def restart(self, start_time=None):
+        self.r.restart(start_time)
+        self.g.restart(start_time)
+        self.b.restart(start_time)
+
+    def evaluate(self, eval_time=None):
+        eval_time = time.time() if eval_time is None else eval_time
+        r_val, r_done = self.r.evaluate(eval_time)
+        g_val, g_done = self.g.evaluate(eval_time)
+        b_val, b_done = self.b.evaluate(eval_time)
+        return (r_val, g_val, b_val), all([r_done, g_done, b_done])
 
 
 class Image(object):
@@ -170,9 +210,9 @@ class DisplayImageEffect(Effect):
         self.image.cleanup()
 
 
-class VerticalScrollImagesEffect(Effect):
+class HorizontalScrollImagesEffect(Effect):
     """
-    Vertical image scrolling effect
+    Horizontal image scrolling effect
     """
     def __init__(self, renderer, image_paths, pixels_per_second=400):
 
@@ -202,7 +242,7 @@ class VerticalScrollImagesEffect(Effect):
 
         pos0 = -self.full_width
         pos1 = (math.ceil(rw / self.full_width) + 1) * self.full_width
-        self.scroll_anim = ValueAnimation(pos0, pos1, (pos1 - pos0) / pixels_per_second, repeat=True)
+        self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / pixels_per_second, repeat=True)
 
         self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
         self.stopping = False
@@ -243,6 +283,84 @@ class VerticalScrollImagesEffect(Effect):
                 done = pos > rw
                 if done:
                     break
+
+        if self.stopping and alpha_anim_done:
+            self.stopped = True
+
+    def cleanup(self):
+        for image in self.images:
+            image.cleanup()
+
+
+class VerticalScrollImagesEffect(Effect):
+    """
+    Vertical image scrolling effect
+    """
+    def __init__(self, renderer, image_paths, pixels_per_second=400):
+
+        self.TOP_BOTTOM_MARGIN = 8
+        self.PIXELS_PER_SECOND = 100
+
+        rw, rh = get_renderer_dimensions(renderer)
+        self.images = [Image(renderer, path) for path in image_paths]
+        self.animations = []
+        self.rects = []
+        self.current_image_idx = 0
+
+        for image in self.images:
+
+            sx = rw / float(image.width)
+            sy = (rh - (self.TOP_BOTTOM_MARGIN * 2)) / float(image.height)
+            s = min(sx, sy)
+
+            w = float(image.width) * s
+            h = float(image.height) * s
+            x = (rw - w) * 0.5
+
+            rect = sdl2.SDL_FRect(x=x, y=0, w=w, h=h)
+            self.rects.append(rect)
+
+        pos0 = rh
+        pos1 = self.TOP_BOTTOM_MARGIN
+        self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True)
+
+        self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
+        self.stopping = False
+        self.stopped = False
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.alpha_anim.evaluate()
+            self.alpha_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def draw_image(self, renderer, idx, alpha, scroll):
+        image = self.images[idx]
+        rect = self.rects[idx]
+        rect.y = scroll
+        sdl2.SDL_SetTextureAlphaMod(image.texture, int(alpha * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, image.texture, image.rect, rect)
+
+    def render(self, renderer):
+
+        rw, rh = get_renderer_dimensions(renderer)
+
+        scroll_val, scroll_anim_done = self.scroll_anim.evaluate()
+        alpha_val, alpha_anim_done = self.alpha_anim.evaluate()
+
+        image = self.images[self.current_image_idx]
+        rect = self.rects[self.current_image_idx]
+
+        self.draw_image(renderer, self.current_image_idx, alpha_val, scroll_val)
+
+        if scroll_anim_done:
+            self.current_image_idx += 1
+            self.current_image_idx %= len(self.images)
+            self.scroll_anim.restart()
+
 
         if self.stopping and alpha_anim_done:
             self.stopped = True
@@ -339,11 +457,26 @@ def process_marquee_command(command, render_manager):
             effect = DisplayImageEffect(render_manager.renderer, command[1])
             render_manager.add_effect(effect)
 
-    elif command[0] == COMMAND_VERT_SCROLL_IMAGES:
+    elif command[0] == COMMAND_HORZ_SCROLL_IMAGES:
         image_paths = command[2:]
         if all([Path(image_path).is_file() for image_path in image_paths]):
-            effect = VerticalScrollImagesEffect(render_manager.renderer, image_paths, pixels_per_second=command[1])
+            effect = HorizontalScrollImagesEffect(render_manager.renderer, image_paths, pixels_per_second=command[1])
             render_manager.add_effect(effect)
+
+    elif command[0] == COMMAND_VERT_SCROLL_IMAGES:
+        image_paths = command[1:]
+        if all([Path(image_path).is_file() for image_path in image_paths]):
+            effect = VerticalScrollImagesEffect(render_manager.renderer, image_paths)
+            render_manager.add_effect(effect)
+
+    elif command[0] == COMMAND_BACKGROUND:
+        if len(command) == 2:
+            r = g = b = command[1]
+        else:
+            r = command[1]
+            g = command[2]
+            b = command[3]
+        render_manager.set_background_color(r, g, b)
 
     else:
         print(f'Invalid command: {command[0]}')
@@ -387,6 +520,7 @@ class RenderManager(object):
     def __init__(self, renderer):
         self.effects = []
         self.renderer = renderer
+        self.color_anim = ColorAnimation((0, 0, 0), (0, 0, 0), 0)
 
     def add_effect(self, effect):
         self.effects.append(effect)
@@ -399,8 +533,21 @@ class RenderManager(object):
         for effect in self.effects:
             effect.cleanup()
 
-    def render(self):
+    def set_background_color(self, r, g, b):
+        def clamp(v):
+            return max(0.0, min(1.0, v))
+        color0, _ = self.color_anim.evaluate()
+        color1 = (clamp(r), clamp(g), clamp(b))
+        self.color_anim = ColorAnimation(color0, color1, 1.0, ease=True)
 
+    def render(self):
+        color, _ = self.color_anim.evaluate()
+        sdl2.SDL_SetRenderDrawColor(
+            self.renderer,
+            int(color[0] * 255),
+            int(color[1] * 255),
+            int(color[2] * 255),
+            255)
         sdl2.SDL_RenderClear(self.renderer)
 
         effects_to_remove = []
