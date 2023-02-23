@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
+import socket
+import struct
 import time
+import pickle
 
-URL = 'localhost'
+HOST = 'localhost'
 PORT = 6000
 READY_MSG = 'marquee ready'
 
@@ -47,14 +50,18 @@ def send_marquee_command(*command):
     Send command to marquee process. Used by clients (including other
     processes) who wants to interact with the marquee screen
     """
-    from multiprocessing.connection import Client
-    try:
-        address = (URL, PORT)
-        with Client(address) as connection:
-            connection.send(command)
-        return True
-    except ConnectionRefusedError:
-        return False
+    TIMEOUT = 0.5
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.settimeout(TIMEOUT)
+            sock.connect((HOST, PORT))
+            buffer = pickle.dumps(command)
+            buffer_size_bytes = struct.pack('<Q', len(buffer))
+            sock.sendall(buffer_size_bytes)
+            sock.sendall(buffer)
+            return True
+        except (ConnectionRefusedError, TimeoutError):
+            return False
 
 
 class Animation(ABC):
@@ -515,16 +522,28 @@ def run_command_listener(command_queue):
     """
     Run the command listener
     """
-    address = (URL, PORT)
-    with Listener(address) as listener:
-        listener._listener._socket.settimeout(0.5)  # Hacky
+    def receive(connection, byte_count):
+        result = b''
+        while len(result) < byte_count:
+            chunk = connection.recv(byte_count - len(result))
+            if chunk:
+                result += chunk
+        return result
+    TIMEOUT = 0.5
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((HOST, PORT))
+        sock.settimeout(TIMEOUT)
+        sock.listen(1)
         while True:
             try:
-                with listener.accept() as connection:
-                    command = connection.recv()
-                    command_queue.put(command)
-                    if command[0] == COMMAND_CLOSE:
-                        break
+                connection, _ = sock.accept()
+                buffer_size_bytes = receive(connection, 8)
+                buffer_size = struct.unpack('<Q', buffer_size_bytes)[0]
+                buffer = receive(connection, buffer_size)
+                command = pickle.loads(buffer)
+                command_queue.put(command)
+                if command[0] == COMMAND_CLOSE:
+                    break
             except TimeoutError:
                 continue
 
