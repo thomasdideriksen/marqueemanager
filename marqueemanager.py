@@ -19,6 +19,7 @@ def start_marquee():
     Start the marquee process
     """
     import subprocess
+    import sys
 
     if send_marquee_command(COMMAND_NOOP):
         # This checks if a marquee process is already running. We only
@@ -29,7 +30,7 @@ def start_marquee():
         return False
 
     process = subprocess.Popen(
-        ['python', __file__],
+        [sys.executable, __file__],
         creationflags=subprocess.DETACHED_PROCESS,
         stdout=subprocess.PIPE)
 
