@@ -501,17 +501,13 @@ def _get_marquee_display_bounds():
     """
     display_count = sdl2.SDL_GetNumVideoDisplays()
 
-    # TODO: Bail out if we only have one display...
-
     marquee_bounds = None
     for display_idx in range(display_count):
 
         bounds = sdl2.SDL_Rect()
         sdl2.SDL_GetDisplayBounds(display_idx, bounds)
 
-        if marquee_bounds is None:
-            marquee_bounds = (bounds.x, bounds.y, bounds.w, int(bounds.h / 8)) # TODO: Remove this hack
-        elif bounds.h < marquee_bounds[3]:
+        if marquee_bounds is None or bounds.h < marquee_bounds[3]:
             marquee_bounds = (bounds.x, bounds.y, bounds.w, bounds.h)
 
     return marquee_bounds
