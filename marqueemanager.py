@@ -29,7 +29,7 @@ def start_marquee():
     # because we're synchronizing using the 'READY_MSG' (see below)
     # which ensures that 'start_marquee' will not return before the
     # command listener is ready
-    if send_marquee_command(COMMAND_NOOP):
+    if noop():
         return False
 
     # Start the marquee process
@@ -47,7 +47,46 @@ def start_marquee():
     return True
 
 
-def send_marquee_command(*command):
+def _make_command(command_name, arguments=None):
+    return {
+        'name': command_name,
+        'arguments': arguments}
+
+
+def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool):
+    return _send_marquee_command(_make_command(COMMAND_HORZ_SCROLL_IMAGES, {
+        'images': image_paths,
+        'speed': speed,
+        'reverse': reverse}))
+
+
+def vertical_scroll_images(image_paths: list[str]):
+    return _send_marquee_command(_make_command(COMMAND_VERT_SCROLL_IMAGES, {
+        'images': image_paths}))
+
+
+def show_image(image_path: str):
+    return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
+        'image': image_path}))
+
+def set_background_color(r, g, b):
+    return _send_marquee_command(_make_command(COMMAND_BACKGROUND, {
+        'color': (r, g, b)}))
+
+
+def noop():
+    return _send_marquee_command(_make_command(COMMAND_NOOP))
+
+
+def clear():
+    return _send_marquee_command(_make_command(COMMAND_CLEAR))
+
+
+def close():
+    return _send_marquee_command(_make_command(COMMAND_CLOSE))
+
+
+def _send_marquee_command(command):
     """
     Send command to marquee process. Used by clients (including other
     processes) who wants to interact with the marquee screen
@@ -255,7 +294,7 @@ class DisplayImageEffect(Effect):
         return self.stopped
 
     def render(self, renderer):
-        rw, rh = get_renderer_dimensions(renderer)
+        rw, rh = _get_renderer_dimensions(renderer)
 
         sw = float(self.image.width)
         sh = float(self.image.height)
@@ -292,7 +331,7 @@ class HorizontalScrollImagesEffect(Effect):
         self.TOP_BOTTOM_MARGIN = 8
         self.IMAGE_IMAGE_MARGIN = 32
 
-        rw, rh = get_renderer_dimensions(renderer)
+        rw, rh = _get_renderer_dimensions(renderer)
         self.images = [Image(renderer, path) for path in image_paths]
         self.animations = []
         self.rects = []
@@ -341,7 +380,7 @@ class HorizontalScrollImagesEffect(Effect):
 
     def render(self, renderer):
 
-        rw, rh = get_renderer_dimensions(renderer)
+        rw, rh = _get_renderer_dimensions(renderer)
 
         scroll_val, _ = self.scroll_anim.evaluate()
         alpha_val, alpha_anim_done = self.alpha_anim.evaluate()
@@ -376,7 +415,7 @@ class VerticalScrollImagesEffect(Effect):
         self.TOP_BOTTOM_MARGIN = 8
         self.PIXELS_PER_SECOND = 100
 
-        rw, rh = get_renderer_dimensions(renderer)
+        rw, rh = _get_renderer_dimensions(renderer)
         self.images = [Image(renderer, path) for path in image_paths]
         self.animations = []
         self.rects = []
@@ -427,7 +466,7 @@ class VerticalScrollImagesEffect(Effect):
 
     def render(self, renderer):
 
-        rw, rh = get_renderer_dimensions(renderer)
+        rw, rh = _get_renderer_dimensions(renderer)
 
         scroll_val, scroll_anim_done = self.scroll_anim.evaluate()
         alpha_val, alpha_anim_done = self.alpha_anim.evaluate()
@@ -450,7 +489,7 @@ class VerticalScrollImagesEffect(Effect):
             image.cleanup()
 
 
-def get_marquee_display_bounds():
+def _get_marquee_display_bounds():
     """
     Get the bounds of the marquee display
     """
@@ -472,13 +511,13 @@ def get_marquee_display_bounds():
     return marquee_bounds
 
 
-def open_marquee_window():
+def _open_marquee_window():
     """
     Open marquee window (used on startup)
     """
     sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO)
 
-    x, y, width, height = get_marquee_display_bounds()
+    x, y, width, height = _get_marquee_display_bounds()
 
     window = sdl2.video.SDL_CreateWindow(
         b'Marquee',
@@ -501,7 +540,7 @@ def open_marquee_window():
     return window, renderer
 
 
-def close_marquee_window(window, renderer):
+def _close_marquee_window(window, renderer):
     """
     Close marquee window (used on shutdown)
     """
@@ -510,7 +549,7 @@ def close_marquee_window(window, renderer):
     sdl2.SDL_Quit()
 
 
-def get_renderer_dimensions(renderer):
+def _get_renderer_dimensions(renderer):
     """
     Get renderer dimensions
     """
@@ -520,52 +559,53 @@ def get_renderer_dimensions(renderer):
     return w.value, h.value
 
 
-def process_marquee_command(command, render_manager):
+def _process_marquee_command(command, render_manager):
     """
     Process marquee command
     """
 
-    if command[0] == COMMAND_CLOSE:
+    name = command['name']
+    args = command['arguments']
+
+    if name == COMMAND_CLOSE:
         return False
 
-    elif command[0] == COMMAND_NOOP:
+    elif name == COMMAND_NOOP:
         pass
 
-    elif command[0] == COMMAND_CLEAR:
+    elif name == COMMAND_CLEAR:
         render_manager.stop_all_effects()
 
-    elif command[0] == COMMAND_SHOW_IMAGE:
-        image_path = Path(command[1])
+    elif name == COMMAND_SHOW_IMAGE:
+        image_path = Path(args['image'])
         if image_path.is_file():
             effect = DisplayImageEffect(render_manager.renderer, command[1])
             render_manager.add_effect(effect)
 
-    elif command[0] == COMMAND_HORZ_SCROLL_IMAGES:
-        image_paths = command[2:]
-        if all([Path(image_path).is_file() for image_path in image_paths]):
-            # TODO: Parameterize "reverse"
-            effect = HorizontalScrollImagesEffect(render_manager.renderer, image_paths, pixels_per_second=command[1])
+    elif name == COMMAND_HORZ_SCROLL_IMAGES:
+        if all([Path(image_path).is_file() for image_path in args['images']]):
+            effect = HorizontalScrollImagesEffect(
+                render_manager.renderer,
+                args['images'],
+                args['speed'],
+                args['reverse'])
             render_manager.add_effect(effect)
 
-    elif command[0] == COMMAND_VERT_SCROLL_IMAGES:
-        image_paths = command[1:]
-        if all([Path(image_path).is_file() for image_path in image_paths]):
-            effect = VerticalScrollImagesEffect(render_manager.renderer, image_paths)
+    elif name == COMMAND_VERT_SCROLL_IMAGES:
+        if all([Path(image_path).is_file() for image_path in args['images']]):
+            effect = VerticalScrollImagesEffect(
+                render_manager.renderer,
+                args['images'])
             render_manager.add_effect(effect)
 
-    elif command[0] == COMMAND_BACKGROUND:
-        if len(command) == 2:
-            r = g = b = command[1]
-        else:
-            r = command[1]
-            g = command[2]
-            b = command[3]
-        render_manager.set_background_color(r, g, b)
+    elif name == COMMAND_BACKGROUND:
+        color = list(args['color'])
+        render_manager.set_background_color(*color)
 
     return True
 
 
-def process_events(events):
+def _process_events(events):
     """
     Return true if termination was requested
     """
@@ -578,7 +618,7 @@ def process_events(events):
     return True
 
 
-def run_command_listener(command_queue, command_listener_thread_ready):
+def _run_command_listener(command_queue, command_listener_thread_ready):
     """
     Run the command listener
     """
@@ -609,7 +649,7 @@ def run_command_listener(command_queue, command_listener_thread_ready):
                 buffer = receive(connection, buffer_size)
                 command = pickle.loads(buffer)
                 command_queue.put(command)
-                if command[0] == COMMAND_CLOSE:
+                if command['name'] == COMMAND_CLOSE:
                     break
             except TimeoutError:
                 continue
@@ -663,12 +703,12 @@ class RenderManager(object):
         sdl2.SDL_RenderPresent(self.renderer)
 
 
-def main():
+def _main():
     """
     Main entry point
     """
     # Create marquee window
-    window, renderer = open_marquee_window()
+    window, renderer = _open_marquee_window()
 
     # Create a command queue that we share between threads
     command_queue = Queue()
@@ -676,7 +716,7 @@ def main():
     # Start the command listener thread
     command_listener_thread_ready = Event()
     command_listener_thread = Thread(
-        target=run_command_listener,
+        target=_run_command_listener,
         name='Marquee command listener thread',
         args=(command_queue, command_listener_thread_ready),
         daemon=True)
@@ -696,13 +736,13 @@ def main():
 
         # Process events
         events = sdl2.ext.get_events()
-        if not process_events(events):
-            send_marquee_command(COMMAND_CLOSE)
+        if not _process_events(events):
+            close()
 
         # Process commands
         if not command_queue.empty():
             command = command_queue.get(block=False)
-            if not process_marquee_command(command, render_manager):
+            if not _process_marquee_command(command, render_manager):
                 break
 
         # Render
@@ -715,7 +755,7 @@ def main():
     command_listener_thread.join()
 
     # Close marquee window and cleanup
-    close_marquee_window(window, renderer)
+    _close_marquee_window(window, renderer)
 
 
 if __name__ == "__main__":
@@ -728,4 +768,4 @@ if __name__ == "__main__":
     from multiprocessing.connection import Listener
     from pathlib import Path
     import math
-    main()
+    _main()
