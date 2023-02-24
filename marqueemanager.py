@@ -24,19 +24,21 @@ def start_marquee():
     import subprocess
     import sys
 
+    # This checks if a marquee process is already running. We only
+    # allow one marquee process to run at the time. This only works
+    # because we're synchronizing using the 'READY_MSG' (see below)
+    # which ensures that 'start_marquee' will not return before the
+    # command listener is ready
     if send_marquee_command(COMMAND_NOOP):
-        # This checks if a marquee process is already running. We only
-        # allow one marquee process to run at the time. This only works
-        # because we're synchronizing using the 'READY_MSG' (see below)
-        # which ensures that 'start_marquee' will not return before the
-        # command listener is ready
         return False
 
+    # Start the marquee process
     process = subprocess.Popen(
         [sys.executable, __file__],
         creationflags=subprocess.DETACHED_PROCESS,
         stdout=subprocess.PIPE)
 
+    # Wait for the marquee process/window to be ready
     while True:
         line = process.stdout.readline().decode('utf8').strip()
         if line == READY_MSG:
@@ -60,7 +62,7 @@ def send_marquee_command(*command):
             sock.sendall(buffer_size_bytes)
             sock.sendall(buffer)
             return True
-        except (ConnectionRefusedError, TimeoutError):
+        except (ConnectionRefusedError, TimeoutError) as ex:
             return False
 
 
@@ -79,11 +81,12 @@ class ValueAnimation(Animation):
     """
     Animates a single numerical value
     """
-    def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False):
+    def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False, linger_duration=0):
         assert duration >= 0.0
         self.begin = begin
         self.end = end
         self.duration = duration
+        self.linger_duration = linger_duration
         self.ease = ease
         self.repeat = repeat
         self.restart(start_time)
@@ -96,8 +99,8 @@ class ValueAnimation(Animation):
         dt = eval_time - self.start_time
         if dt < 0:
             return self.begin, False
-        if self.repeat and dt > self.duration:
-            dt %= self.duration
+        if self.repeat and dt > self.duration + self.linger_duration:
+            dt %= (self.duration + self.linger_duration)
         if dt < self.duration:
             r = dt / self.duration
             if self.ease:
@@ -105,7 +108,7 @@ class ValueAnimation(Animation):
                 r = -(r * r * r * r - 1.0)
             return self.begin + (self.end - self.begin) * r, False
         else:
-            return self.end, True
+            return self.end, dt > self.duration + self.linger_duration
 
 
 class ColorAnimation(Animation):
@@ -343,7 +346,7 @@ class VerticalScrollImagesEffect(Effect):
 
         pos0 = rh
         pos1 = self.TOP_BOTTOM_MARGIN
-        self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True)
+        self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True, linger_duration=2.0, repeat=True)
 
         self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
         self.stopping = False
@@ -518,10 +521,12 @@ def process_events(events):
     return True
 
 
-def run_command_listener(command_queue):
+def run_command_listener(command_queue, command_listener_thread_ready):
     """
     Run the command listener
     """
+
+    # Helper function for receiving data
     def receive(connection, byte_count):
         result = b''
         while len(result) < byte_count:
@@ -529,11 +534,16 @@ def run_command_listener(command_queue):
             if chunk:
                 result += chunk
         return result
+
+    # Create socket
     TIMEOUT = 0.5
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((HOST, PORT))
         sock.settimeout(TIMEOUT)
         sock.listen(1)
+        command_listener_thread_ready.set()
+
+        # Main receive loop
         while True:
             try:
                 connection, _ = sock.accept()
@@ -607,10 +617,11 @@ def main():
     command_queue = Queue()
 
     # Start the command listener thread
+    command_listener_thread_ready = Event()
     command_listener_thread = Thread(
         target=run_command_listener,
         name='Marquee command listener thread',
-        args=(command_queue,),
+        args=(command_queue, command_listener_thread_ready),
         daemon=True)
     command_listener_thread.start()
 
@@ -619,6 +630,7 @@ def main():
 
     # A parent process may listen for this (i.e. via a pipe) to
     # know when the marquee window has been created
+    command_listener_thread_ready.wait()
     sys.stdout.write(f'{READY_MSG}\r\n')
     sys.stdout.flush()
 
@@ -654,7 +666,7 @@ if __name__ == "__main__":
     import sdl2
     import sdl2.ext
     from ctypes import c_int, byref
-    from threading import Thread
+    from threading import Thread, Event
     from queue import Queue
     from multiprocessing.connection import Listener
     from pathlib import Path
