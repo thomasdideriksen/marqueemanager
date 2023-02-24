@@ -69,6 +69,7 @@ def show_image(image_path: str):
     return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
         'image': image_path}))
 
+
 def set_background_color(r, g, b):
     return _send_marquee_command(_make_command(COMMAND_BACKGROUND, {
         'color': (r, g, b)}))
@@ -227,8 +228,11 @@ class Image(object):
     """
     Small wrapper class for images
     """
-    def __init__(self, renderer, path):
-        self.surface = sdl2.ext.image.load_img(path, as_argb=True)
+    def __init__(self, renderer, path, height=0, width=0):
+        if path.lower().endswith('.svg'):
+            self.surface = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
+        else:
+            self.surface = sdl2.ext.image.load_img(path, as_argb=True)
         self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
         sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
 
@@ -279,7 +283,8 @@ class DisplayImageEffect(Effect):
     Effect for displaying an image
     """
     def __init__(self, renderer, image_path):
-        self.image = Image(renderer, image_path)
+        _, h = _get_renderer_dimensions(renderer)
+        self.image = Image(renderer, image_path, height=h)
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
         self.stopping = False
         self.stopped = False
@@ -328,11 +333,12 @@ class HorizontalScrollImagesEffect(Effect):
     """
     def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False):
 
-        self.TOP_BOTTOM_MARGIN = 8
-        self.IMAGE_IMAGE_MARGIN = 32
-
         rw, rh = _get_renderer_dimensions(renderer)
-        self.images = [Image(renderer, path) for path in image_paths]
+
+        self.TOP_BOTTOM_MARGIN = 8
+        self.IMAGE_IMAGE_MARGIN = 64
+
+        self.images = [Image(renderer, path, height=rh) for path in image_paths]
         self.animations = []
         self.rects = []
         self.full_width = 0.0
@@ -410,13 +416,13 @@ class VerticalScrollImagesEffect(Effect):
     """
     Vertical image scrolling effect
     """
-    def __init__(self, renderer, image_paths, pixels_per_second=400):
+    def __init__(self, renderer, image_paths):
 
         self.TOP_BOTTOM_MARGIN = 8
         self.PIXELS_PER_SECOND = 100
 
         rw, rh = _get_renderer_dimensions(renderer)
-        self.images = [Image(renderer, path) for path in image_paths]
+        self.images = [Image(renderer, path, height=rh) for path in image_paths]
         self.animations = []
         self.rects = []
         self.current_image_idx = 0
