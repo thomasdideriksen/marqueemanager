@@ -73,6 +73,10 @@ class Animation(ABC):
         pass
 
     @abstractmethod
+    def total_duration(self):
+        pass
+
+    @abstractmethod
     def evaluate(self, eval_time=None):
         pass
 
@@ -81,11 +85,12 @@ class ValueAnimation(Animation):
     """
     Animates a single numerical value
     """
-    def __init__(self, begin, end, duration, start_time=None, ease=False, repeat=False, linger_duration=0):
+    def __init__(self, begin, end, duration=0, start_time=None, ease=False, repeat=False, linger_duration=0, start_delay=0):
         assert duration >= 0.0
         self.begin = begin
         self.end = end
         self.duration = duration
+        self.start_delay = start_delay
         self.linger_duration = linger_duration
         self.ease = ease
         self.repeat = repeat
@@ -94,21 +99,61 @@ class ValueAnimation(Animation):
     def restart(self, start_time=None):
         self.start_time = time.time() if start_time is None else start_time
 
+    def total_duration(self):
+        return self.start_delay + self.duration + self.linger_duration
+
     def evaluate(self, eval_time=None):
         eval_time = time.time() if eval_time is None else eval_time
         dt = eval_time - self.start_time
+
         if dt < 0:
             return self.begin, False
-        if self.repeat and dt > self.duration + self.linger_duration:
-            dt %= (self.duration + self.linger_duration)
-        if dt < self.duration:
-            r = dt / self.duration
+
+        total_duration = self.total_duration()
+        if self.repeat and dt > total_duration:
+            dt %= total_duration
+
+        if dt < self.start_delay:
+            return self.begin, False
+
+        if dt < self.start_delay + self.duration:
+            r = (dt - self.start_delay) / self.duration
             if self.ease:
                 r = r - 1.0
                 r = -(r * r * r * r - 1.0)
             return self.begin + (self.end - self.begin) * r, False
-        else:
-            return self.end, dt > self.duration + self.linger_duration
+
+        return self.end, dt > total_duration
+
+
+class AnimationSequence(Animation):
+
+    def __init__(self, *animations, repeat=False):
+        self.animations = animations
+        self.idx = 0
+
+    def restart(self, start_time=None):
+        self.idx = 0
+        for anim in self.animations:
+            anim.restart(start_time)
+
+    def total_duration(self):
+        sum = 0.0
+        for anim in self.animations:
+            sum += anim.total_duration()
+        return sum
+
+    def evaluate(self, eval_time=None):
+        anim = self.animations[self.idx]
+        val, done = anim.evaluate(eval_time)
+        if done and self.idx < len(self.animations) - 1:
+            old_anim = self.animations[self.idx]
+            new_anim_start_time = old_anim.start_time + old_anim.total_duration()
+            self.idx += 1
+            new_anim = self.animations[self.idx]
+            new_anim.restart(new_anim_start_time)
+            return val, False
+        return val, done
 
 
 class ColorAnimation(Animation):
@@ -124,6 +169,12 @@ class ColorAnimation(Animation):
         self.r.restart(start_time)
         self.g.restart(start_time)
         self.b.restart(start_time)
+
+    def total_duration(self):
+        return max(
+            self.r.total_duration(),
+            self.g.total_duration(),
+            self.b.total_duration())
 
     def evaluate(self, eval_time=None):
         eval_time = time.time() if eval_time is None else eval_time
@@ -346,7 +397,13 @@ class VerticalScrollImagesEffect(Effect):
 
         pos0 = rh
         pos1 = self.TOP_BOTTOM_MARGIN
-        self.scroll_anim = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True, linger_duration=2.0, repeat=True)
+        anim1 = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True, linger_duration=1)
+
+        pos0 = self.TOP_BOTTOM_MARGIN
+        pos1 = -self.rects[self.current_image_idx].h
+        anim2 = ValueAnimation(pos0, pos1, abs(pos1 - pos0) / self.PIXELS_PER_SECOND, ease=True)
+
+        self.scroll_anim = AnimationSequence(anim1, anim2)
 
         self.alpha_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
         self.stopping = False
