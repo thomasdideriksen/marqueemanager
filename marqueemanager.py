@@ -9,7 +9,8 @@ PORT = 6000
 READY_MSG = 'marquee ready'
 
 COMMAND_CLEAR = 'clear'
-COMMAND_SHOW_IMAGE = 'image'
+COMMAND_SHOW_IMAGE = 'showimage'
+COMMAND_PULSE_IMAGE = 'pulseimage'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
@@ -47,12 +48,6 @@ def start_marquee():
     return True
 
 
-def _make_command(command_name, arguments=None):
-    return {
-        'name': command_name,
-        'arguments': arguments}
-
-
 def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool):
     return _send_marquee_command(_make_command(COMMAND_HORZ_SCROLL_IMAGES, {
         'images': image_paths,
@@ -67,6 +62,11 @@ def vertical_scroll_images(image_paths: list[str]):
 
 def show_image(image_path: str):
     return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
+        'image': image_path}))
+
+
+def pulse_image(image_path: str):
+    return _send_marquee_command(_make_command(COMMAND_PULSE_IMAGE, {
         'image': image_path}))
 
 
@@ -85,6 +85,12 @@ def clear():
 
 def close():
     return _send_marquee_command(_make_command(COMMAND_CLOSE))
+
+
+def _make_command(command_name, arguments=None):
+    return {
+        'name': command_name,
+        'arguments': arguments}
 
 
 def _send_marquee_command(command):
@@ -171,6 +177,7 @@ class AnimationSequence(Animation):
     def __init__(self, *animations, repeat=False):
         self.animations = animations
         self.idx = 0
+        self.repeat = repeat
 
     def restart(self, start_time=None):
         self.idx = 0
@@ -186,10 +193,11 @@ class AnimationSequence(Animation):
     def evaluate(self, eval_time=None):
         anim = self.animations[self.idx]
         val, done = anim.evaluate(eval_time)
-        if done and self.idx < len(self.animations) - 1:
+        if done and (self.idx < len(self.animations) - 1 or self.repeat):
             old_anim = self.animations[self.idx]
             new_anim_start_time = old_anim.start_time + old_anim.total_duration()
             self.idx += 1
+            self.idx %= len(self.animations)
             new_anim = self.animations[self.idx]
             new_anim.restart(new_anim_start_time)
             return val, False
@@ -278,7 +286,7 @@ class Effect(ABC):
         pass
 
 
-class DisplayImageEffect(Effect):
+class ShowImageEffect(Effect):
     """
     Effect for displaying an image
     """
@@ -307,6 +315,63 @@ class DisplayImageEffect(Effect):
         sx = rw / sw
         sy = rh / sh
         s = min(sx, sy, 1.0)
+
+        dw = sw * s
+        dh = sh * s
+        dx = (rw - dw) * 0.5
+        dy = (rh - dh) * 0.5
+
+        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+
+        value, fade_animation_done = self.fade_anim.evaluate()
+
+        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(value * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
+
+        if self.stopping and fade_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        self.image.cleanup()
+
+
+class PulseImageEffect(Effect):
+    """
+    Effect for pulsing an image
+    """
+    def __init__(self, renderer, image_path):
+        _, h = _get_renderer_dimensions(renderer)
+        self.image = Image(renderer, image_path, height=h)
+        self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
+
+        grow = ValueAnimation(1, 1.25, 0.25, ease=True)
+        shrink = ValueAnimation(1.25, 1.0, 2.0, ease=True, linger_duration=0.1)
+        self.pulse_anim = AnimationSequence(grow, shrink, repeat=True)
+
+        self.stopping = False
+        self.stopped = False
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+        rw, rh = _get_renderer_dimensions(renderer)
+
+        sw = float(self.image.width)
+        sh = float(self.image.height)
+
+        sx = rw / sw
+        sy = rh / sh
+        s = min(sx, sy, 1.0)
+
+        pulse_scale, _ = self.pulse_anim.evaluate()
+        s *= pulse_scale
 
         dw = sw * s
         dh = sh * s
@@ -581,7 +646,13 @@ def _process_marquee_command(command, render_manager):
     elif name == COMMAND_SHOW_IMAGE:
         image_path = Path(args['image'])
         if image_path.is_file():
-            effect = DisplayImageEffect(render_manager.renderer, command[1])
+            effect = ShowImageEffect(render_manager.renderer, args['image'])
+            render_manager.add_effect(effect)
+
+    elif name == COMMAND_PULSE_IMAGE:
+        image_path = Path(args['image'])
+        if image_path.is_file():
+            effect = PulseImageEffect(render_manager.renderer, args['image'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_HORZ_SCROLL_IMAGES:
