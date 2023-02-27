@@ -314,7 +314,7 @@ class ShowImageEffect(Effect):
 
         sx = rw / sw
         sy = rh / sh
-        s = min(sx, sy, 1.0)
+        s = min(sx, sy)
 
         dw = sw * s
         dh = sh * s
@@ -368,7 +368,7 @@ class PulseImageEffect(Effect):
 
         sx = rw / sw
         sy = rh / sh
-        s = min(sx, sy, 1.0)
+        s = min(sx, sy)
 
         pulse_scale, _ = self.pulse_anim.evaluate()
         s *= pulse_scale
