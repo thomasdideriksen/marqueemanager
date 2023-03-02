@@ -17,25 +17,26 @@ COMMAND_BACKGROUND = 'background'
 COMMAND_CLOSE = 'close'
 COMMAND_NOOP = 'noop'
 
+DISPLAY_ONLY_MARQUEE = -1
+DISPLAY_DEBUG = -2
 
-def start_marquee():
+
+def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     """
     Start the marquee process
     """
     import subprocess
     import sys
 
-    # This checks if a marquee process is already running. We only
-    # allow one marquee process to run at the time. This only works
-    # because we're synchronizing using the 'READY_MSG' (see below)
-    # which ensures that 'start_marquee' will not return before the
-    # command listener is ready
+    # This checks if a marquee process is already running. This is
+    # not really concurrency safe, i.e. if two processes call start_marquee
+    # in rapid succession, this would not catch it-- TODO: Come up with a better approach
     if noop():
         return False
 
     # Start the marquee process
     process = subprocess.Popen(
-        [sys.executable, __file__],
+        [sys.executable, __file__, str(display_idx)],
         creationflags=subprocess.DETACHED_PROCESS,
         stdout=subprocess.PIPE)
 
@@ -48,11 +49,13 @@ def start_marquee():
     return True
 
 
-def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool):
+def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
     return _send_marquee_command(_make_command(COMMAND_HORZ_SCROLL_IMAGES, {
         'images': image_paths,
         'speed': speed,
-        'reverse': reverse}))
+        'reverse': reverse,
+        'margin': margin,
+        'spacing': spacing}))
 
 
 def vertical_scroll_images(image_paths: list[str]):
@@ -237,10 +240,24 @@ class Image(object):
     Small wrapper class for images
     """
     def __init__(self, renderer, path, height=0, width=0):
+
+        MAX_DIM = 8192
         if path.lower().endswith('.svg'):
-            self.surface = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
+            surf = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
+            # Don't exceed max allowed texture size
+            if surf.w > MAX_DIM or surf.h > MAX_DIM:
+                sx = MAX_DIM / float(surf.w)
+                sy = MAX_DIM / float(surf.h)
+                s = min(sx, sy)
+                sdl2.SDL_FreeSurface(surf)
+                surf = sdl2.ext.image.load_svg(path, int(width * s), int(height * s), as_argb=True)
+            self.surface = surf
         else:
             self.surface = sdl2.ext.image.load_img(path, as_argb=True)
+
+        assert self.surface.w < MAX_DIM
+        assert self.surface.h < MAX_DIM
+
         self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
         sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
 
@@ -396,12 +413,12 @@ class HorizontalScrollImagesEffect(Effect):
     """
     Horizontal image scrolling effect
     """
-    def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False):
+    def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False, margin=8, spacing=64):
 
         rw, rh = _get_renderer_dimensions(renderer)
 
-        self.TOP_BOTTOM_MARGIN = 8
-        self.IMAGE_IMAGE_MARGIN = 64
+        self.margin = margin
+        self.spacing = spacing
 
         self.images = [Image(renderer, path, height=rh) for path in image_paths]
         self.animations = []
@@ -410,9 +427,7 @@ class HorizontalScrollImagesEffect(Effect):
 
         for image in self.images:
 
-            sx = rw / float(image.width)
-            sy = (rh - (self.TOP_BOTTOM_MARGIN * 2)) / float(image.height)
-            s = min(sx, sy)
+            s = (rh - (self.margin * 2)) / float(image.height)
 
             w = float(image.width) * s
             h = float(image.height) * s
@@ -421,7 +436,7 @@ class HorizontalScrollImagesEffect(Effect):
             rect = sdl2.SDL_FRect(x=0, y=y, w=w, h=h)
             self.rects.append(rect)
 
-            self.full_width += rect.w + self.IMAGE_IMAGE_MARGIN
+            self.full_width += rect.w + self.spacing
 
         pos0 = -self.full_width
         pos1 = (math.ceil(rw / self.full_width) + 1) * self.full_width
@@ -464,7 +479,7 @@ class HorizontalScrollImagesEffect(Effect):
             for idx, _ in enumerate(self.images):
                 self.draw_image(renderer, idx, alpha_val, pos)
                 rect = self.rects[idx]
-                pos += rect.w + self.IMAGE_IMAGE_MARGIN
+                pos += rect.w + self.spacing
                 done = pos > rw
                 if done:
                     break
@@ -560,36 +575,54 @@ class VerticalScrollImagesEffect(Effect):
             image.cleanup()
 
 
-def _get_marquee_display_bounds():
+def _get_marquee_display_bounds(display_idx=DISPLAY_ONLY_MARQUEE):
     """
     Get the bounds of the marquee display
     """
+    # Gather all display bounds
     display_count = sdl2.SDL_GetNumVideoDisplays()
-
-    marquee_bounds = None
-    for display_idx in range(display_count):
-
+    all_display_bounds = []
+    for idx in range(display_count):
         bounds = sdl2.SDL_Rect()
-        sdl2.SDL_GetDisplayBounds(display_idx, bounds)
+        sdl2.SDL_GetDisplayBounds(idx, bounds)
+        all_display_bounds.append(bounds)
 
-        if marquee_bounds is None or bounds.h < marquee_bounds[3]:
-            marquee_bounds = (bounds.x, bounds.y, bounds.w, bounds.h)
+    if display_idx == DISPLAY_ONLY_MARQUEE:
 
-    return marquee_bounds
+        # Only display if there are more than one display, pick the one with the smallest height
+        assert display_count > 1
+        auto_idx = 0
+        for idx, bounds in enumerate(all_display_bounds):
+            if bounds.h < all_display_bounds[auto_idx].h:
+                auto_idx = idx
+        return all_display_bounds[auto_idx]
+
+    elif display_idx == DISPLAY_DEBUG:
+
+        # Debug mode, create narrow display on subset of the main display
+        bounds = all_display_bounds[0]
+        bounds.h = int(bounds.h / 3.0)
+        return bounds
+
+    else:
+
+        # Select explicitly defined display
+        display_idx = max(0, min(display_count - 1, display_idx))
+        return all_display_bounds[display_idx]
 
 
-def _open_marquee_window():
+def _open_marquee_window(display_idx=DISPLAY_ONLY_MARQUEE):
     """
     Open marquee window (used on startup)
     """
     sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO)
 
-    x, y, width, height = _get_marquee_display_bounds()
+    bounds = _get_marquee_display_bounds(display_idx)
 
     window = sdl2.video.SDL_CreateWindow(
         b'Marquee',
-        x, y,
-        width, height,
+        bounds.x, bounds.y,
+        bounds.w, bounds.h,
         sdl2.SDL_WINDOW_BORDERLESS | sdl2.SDL_WINDOW_VULKAN)
 
     sdl2.SDL_SetWindowAlwaysOnTop(window, True)
@@ -661,7 +694,9 @@ def _process_marquee_command(command, render_manager):
                 render_manager.renderer,
                 args['images'],
                 args['speed'],
-                args['reverse'])
+                args['reverse'],
+                args['margin'],
+                args['spacing'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_VERT_SCROLL_IMAGES:
@@ -781,7 +816,8 @@ def _main():
     Main entry point
     """
     # Create marquee window
-    window, renderer = _open_marquee_window()
+    display_idx = int(sys.argv[1]) if len(sys.argv) > 1 else DISPLAY_ONLY_MARQUEE
+    window, renderer = _open_marquee_window(display_idx)
 
     # Create a command queue that we share between threads
     command_queue = Queue()
