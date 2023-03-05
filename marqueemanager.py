@@ -11,6 +11,7 @@ READY_MSG = 'marquee ready'
 COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'showimage'
 COMMAND_PULSE_IMAGE = 'pulseimage'
+COMMAND_PLAY_VIDEO = 'playvideo'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
@@ -71,6 +72,11 @@ def show_image(image_path: str):
 def pulse_image(image_path: str):
     return _send_marquee_command(_make_command(COMMAND_PULSE_IMAGE, {
         'image': image_path}))
+
+
+def play_video(video_path: str):
+    return _send_marquee_command(_make_command(COMMAND_PLAY_VIDEO, {
+        'video': video_path}))
 
 
 def set_background_color(r, g, b):
@@ -350,6 +356,102 @@ class ShowImageEffect(Effect):
 
     def cleanup(self):
         self.image.cleanup()
+
+
+class VideoPlaybackEffect(Effect):
+    """
+    Effect for video playback
+    """
+    def __init__(self, renderer, video_path):
+
+        self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
+        self.video = open(video_path, 'rb')
+        self.reader = decord.VideoReader(self.video)
+        self.t0 = time.time()
+        self.fps = self.reader.get_avg_fps()
+        self.last_frame = None
+        self.last_frame_idx = None
+
+        frame = self.reader.next()
+        self.surface = sdl2.SDL_CreateRGBSurface(0, frame.shape[1], frame.shape[0], frame.shape[2] * 8, 0, 0, 0, 0)
+        self.surface_access = sdl2.ext.pixelaccess.pixels3d(self.surface, transpose=False)
+
+        self.stopping = False
+        self.stopped = False
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+
+        # Determine frame index
+        dt = time.time() - self.t0
+        frame_idx = int(round(dt * self.fps)) % len(self.reader)
+
+        if frame_idx != self.last_frame_idx:
+
+            # Decode frame
+            self.reader.seek(frame_idx)
+            self.last_frame = self.reader.next().asnumpy()
+            self.last_frame = np.flip(self.last_frame, axis=2)
+            self.last_frame_idx = frame_idx
+
+            # Copy frame to surface
+            np.copyto(self.surface_access, self.last_frame)
+
+        # Make texture from surface
+        tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
+        sdl2.SDL_SetTextureBlendMode(tex, sdl2.SDL_BLENDMODE_BLEND)
+
+        # Set texture alpha value
+        value, fade_animation_done = self.fade_anim.evaluate()
+        value *= 0.35
+        sdl2.SDL_SetTextureAlphaMod(tex, int(value * 255.0))
+
+        # Source rect
+        w = self.last_frame.shape[1]
+        h = self.last_frame.shape[0]
+        src_rect = sdl2.SDL_Rect(0, 0, w, h)
+
+        # Destination rect
+        rw, rh = _get_renderer_dimensions(renderer)
+
+        sw = float(w)
+        sh = float(h)
+
+        sx = rw / sw
+        sy = rh / sh
+        s = max(sx, sy)
+
+        dw = sw * s
+        dh = sh * s
+        dx = (rw - dw) * 0.5
+        dy = (rh - dh) * 0.5
+
+        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+
+        # Render
+        sdl2.SDL_RenderCopyF(
+            renderer,
+            tex,
+            src_rect,
+            dst_rect)
+
+        # Cleanup texture
+        sdl2.SDL_DestroyTexture(tex)
+
+        if self.stopping and fade_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        self.video.close()
+        sdl2.SDL_FreeSurface(self.surface)
 
 
 class PulseImageEffect(Effect):
@@ -710,6 +812,11 @@ def _process_marquee_command(command, render_manager):
         color = list(args['color'])
         render_manager.set_background_color(*color)
 
+    elif name == COMMAND_PLAY_VIDEO:
+        if Path(args['video']).is_file():
+            effect = VideoPlaybackEffect(render_manager.renderer, args['video'])
+            render_manager.add_effect(effect)
+
     return True
 
 
@@ -877,4 +984,6 @@ if __name__ == "__main__":
     from multiprocessing.connection import Listener
     from pathlib import Path
     import math
+    import decord
+    import numpy as np
     _main()
