@@ -21,6 +21,10 @@ COMMAND_NOOP = 'noop'
 DISPLAY_ONLY_MARQUEE = -1
 DISPLAY_DEBUG = -2
 
+FIT_FILL = 'fill'
+FIT_FIT = 'fit'
+FIT_STRETCH = 'stretch'
+FIT_CENTER = 'center'
 
 def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     """
@@ -74,9 +78,12 @@ def pulse_image(image_path: str):
         'image': image_path}))
 
 
-def play_video(video_path: str):
+def play_video(video_path: str, margin: float, alpha: float, fit: str):
     return _send_marquee_command(_make_command(COMMAND_PLAY_VIDEO, {
-        'video': video_path}))
+        'video': video_path,
+        'margin': margin,
+        'alpha': alpha,
+        'fit': fit}))
 
 
 def set_background_color(r, g, b):
@@ -100,6 +107,37 @@ def _make_command(command_name, arguments=None):
     return {
         'name': command_name,
         'arguments': arguments}
+
+
+def _get_fit_rect(iw, ih, rw, rh, fit=FIT_FIT, margin=0):
+
+    ih = float(ih)
+    iw = float(iw)
+
+    rh = float(rh)
+    rw = float(rw)
+
+    sx = (rw - 2 * margin) / iw
+    sy = (rh - 2 * margin) / ih
+
+    if fit == FIT_FILL:
+        s = max(sx, sy)
+
+    elif fit == FIT_FIT:
+        s = min(sx, sy)
+
+    elif fit == FIT_STRETCH:
+        return sdl2.SDL_FRect(x=margin, y=margin, w=rw - 2 * margin, h=rh - 2 * margin)
+
+    elif fit == FIT_CENTER:
+        s = 1.0
+
+    dw = iw * s
+    dh = ih * s
+    dx = (rw - dw) * 0.5
+    dy = (rh - dh) * 0.5
+
+    return sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
 
 def _send_marquee_command(command):
@@ -362,18 +400,23 @@ class VideoPlaybackEffect(Effect):
     """
     Effect for video playback
     """
-    def __init__(self, renderer, video_path):
+    def __init__(self, renderer, video_path, margin, alpha, fit):
 
+        self.fit = fit
+        self.margin = margin
+        self.alpha = alpha
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
-        self.video = open(video_path, 'rb')
-        self.reader = decord.VideoReader(self.video)
-        self.t0 = time.time()
-        self.fps = self.reader.get_avg_fps()
-        self.last_frame = None
-        self.last_frame_idx = None
 
-        frame = self.reader.next()
-        self.surface = sdl2.SDL_CreateRGBSurface(0, frame.shape[1], frame.shape[0], frame.shape[2] * 8, 0, 0, 0, 0)
+        self.t0 = time.time()
+        self.last_frame = None
+        self.next_frame_idx = 0
+
+        self.video = cv2.VideoCapture(video_path)
+        self.fps = self.video.get(cv2.CAP_PROP_FPS)
+        w = self.video.get(cv2.CAP_PROP_FRAME_WIDTH)
+        h = self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+        self.surface = sdl2.SDL_CreateRGBSurface(0, int(w), int(h), 24, 0, 0, 0, 0)
         self.surface_access = sdl2.ext.pixelaccess.pixels3d(self.surface, transpose=False)
 
         self.stopping = False
@@ -388,22 +431,43 @@ class VideoPlaybackEffect(Effect):
     def is_stopped(self):
         return self.stopped
 
+    def reset_video(self):
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self.t0 = time.time()
+        self.next_frame_idx = 0
+
     def render(self, renderer):
 
-        # Determine frame index
+        # Compute desired frame index
         dt = time.time() - self.t0
-        frame_idx = int(round(dt * self.fps)) % len(self.reader)
+        desired_frame_idx = int(round(dt * self.fps))
 
-        if frame_idx != self.last_frame_idx:
+        if desired_frame_idx < self.next_frame_idx:
+            # We're ahead, just re-use the last frame until we're caught up
+            frame = self.last_frame
 
-            # Decode frame
-            self.reader.seek(frame_idx)
-            self.last_frame = self.reader.next().asnumpy()
-            self.last_frame = np.flip(self.last_frame, axis=2)
-            self.last_frame_idx = frame_idx
+        else:
+            # We're behind, we need to read some throw-away frames to catch up
+            catchup_frames = desired_frame_idx - self.next_frame_idx
+            for i in range(catchup_frames):
+                ret, _ = self.video.read()
+                self.next_frame_idx += 1
+                if not ret:
+                    self.reset_video()
+                    return
 
-            # Copy frame to surface
-            np.copyto(self.surface_access, self.last_frame)
+            # This is the frame we will use
+            ret, frame = self.video.read()
+            self.next_frame_idx += 1
+            if not ret:
+                self.reset_video()
+                return
+
+        # Store the last frame we've shown
+        self.last_frame = frame
+
+        # Copy frame to surface
+        np.copyto(self.surface_access, frame)
 
         # Make texture from surface
         tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
@@ -411,8 +475,7 @@ class VideoPlaybackEffect(Effect):
 
         # Set texture alpha value
         value, fade_animation_done = self.fade_anim.evaluate()
-        value *= 0.35
-        sdl2.SDL_SetTextureAlphaMod(tex, int(value * 255.0))
+        sdl2.SDL_SetTextureAlphaMod(tex, int(value * self.alpha * 255.0))
 
         # Source rect
         w = self.last_frame.shape[1]
@@ -421,20 +484,7 @@ class VideoPlaybackEffect(Effect):
 
         # Destination rect
         rw, rh = _get_renderer_dimensions(renderer)
-
-        sw = float(w)
-        sh = float(h)
-
-        sx = rw / sw
-        sy = rh / sh
-        s = max(sx, sy)
-
-        dw = sw * s
-        dh = sh * s
-        dx = (rw - dw) * 0.5
-        dy = (rh - dh) * 0.5
-
-        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+        dst_rect = _get_fit_rect(w, h, rw, rh, fit=self.fit, margin=self.margin)
 
         # Render
         sdl2.SDL_RenderCopyF(
@@ -450,7 +500,8 @@ class VideoPlaybackEffect(Effect):
             self.stopped = True
 
     def cleanup(self):
-        self.video.close()
+        #self.video.close()
+        self.video.release()
         sdl2.SDL_FreeSurface(self.surface)
 
 
@@ -485,8 +536,10 @@ class PulseImageEffect(Effect):
         sw = float(self.image.width)
         sh = float(self.image.height)
 
-        sx = rw / sw
-        sy = rh / sh
+        MARGIN = 8
+
+        sx = (rw - 2 * MARGIN) / sw
+        sy = (rh - 2 * MARGIN) / sh
         s = min(sx, sy)
 
         pulse_scale, _ = self.pulse_anim.evaluate()
@@ -814,7 +867,7 @@ def _process_marquee_command(command, render_manager):
 
     elif name == COMMAND_PLAY_VIDEO:
         if Path(args['video']).is_file():
-            effect = VideoPlaybackEffect(render_manager.renderer, args['video'])
+            effect = VideoPlaybackEffect(render_manager.renderer, args['video'], args['margin'], args['alpha'], args['fit'])
             render_manager.add_effect(effect)
 
     return True
@@ -984,6 +1037,7 @@ if __name__ == "__main__":
     from multiprocessing.connection import Listener
     from pathlib import Path
     import math
-    import decord
+    #import decord
     import numpy as np
+    import cv2
     _main()
