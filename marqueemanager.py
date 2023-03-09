@@ -47,11 +47,12 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
 
     # Wait for the marquee process/window to be ready
     while True:
+        if process.poll() != None:
+            # If the marquee process crashed we return false
+            return False
         line = process.stdout.readline().decode('utf8').strip()
         if line == READY_MSG:
-            break
-
-    return True
+            return True
 
 
 def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
@@ -463,7 +464,7 @@ class VideoPlaybackEffect(Effect):
                 self.reset_video()
                 return
 
-        # Store the last frame we've shown
+        # Store the last frame
         self.last_frame = frame
 
         # Copy frame to surface
@@ -1037,7 +1038,6 @@ if __name__ == "__main__":
     from multiprocessing.connection import Listener
     from pathlib import Path
     import math
-    #import decord
     import numpy as np
     import cv2
     _main()
