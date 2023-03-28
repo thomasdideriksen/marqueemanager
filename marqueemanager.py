@@ -37,7 +37,7 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     # not really concurrency safe, i.e. if two processes call start_marquee
     # in rapid succession, this would not catch it-- TODO: Come up with a better approach
     if noop():
-        return False
+        return 0
 
     # Start the marquee process
     process = subprocess.Popen(
@@ -49,10 +49,10 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     while True:
         if process.poll() != None:
             # If the marquee process crashed we return false
-            return False
+            return -1
         line = process.stdout.readline().decode('utf8').strip()
         if line == READY_MSG:
-            return True
+            return 1
 
 
 def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
@@ -1012,8 +1012,13 @@ def _main():
         # Process commands
         if not command_queue.empty():
             command = command_queue.get(block=False)
-            if not _process_marquee_command(command, render_manager):
-                break
+            try:
+                if not _process_marquee_command(command, render_manager):
+                    break
+            except SDLError:
+                # Hacky, but some media files fail to load and this is the easiest
+                # place to handle/ignore that
+                pass
 
         # Render
         render_manager.render()
@@ -1032,6 +1037,7 @@ if __name__ == "__main__":
     import sys
     import sdl2
     import sdl2.ext
+    from sdl2.ext.err import SDLError
     from ctypes import c_int, byref
     from threading import Thread, Event
     from queue import Queue
