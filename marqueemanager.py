@@ -10,6 +10,7 @@ READY_MSG = 'marquee ready'
 
 COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'showimage'
+COMMAND_FLYOUT = 'flyout'
 COMMAND_PULSE_IMAGE = 'pulseimage'
 COMMAND_PLAY_VIDEO = 'playvideo'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
@@ -72,6 +73,13 @@ def vertical_scroll_images(image_paths: list[str]):
 def show_image(image_path: str):
     return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
         'image': image_path}))
+
+
+def flyout(image_path: str, alpha: float, height: float):
+    return _send_marquee_command(_make_command(COMMAND_FLYOUT, {
+        'image': image_path,
+        'alpha': alpha,
+        'height': height}))
 
 
 def pulse_image(image_path: str):
@@ -346,6 +354,61 @@ class Effect(ABC):
     @abstractmethod
     def cleanup(self):
         pass
+
+
+class FlyoutEffect(Effect):
+    """
+    Effect for displaying an image
+    """
+    def __init__(self, renderer, image_path, alpha, height_pct):
+        _, h = _get_renderer_dimensions(renderer)
+        self.alpha = alpha
+        self.height_pct = height_pct
+        self.image = Image(renderer, image_path, height=h)
+        self.fade_anim = ValueAnimation(0.0, 1.0, 2.0, ease=True)
+        self.translate_anim = ValueAnimation(0.0, 1.0, 4.0, ease=True)
+        self.stopping = False
+        self.stopped = False
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_fade_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_fade_value, 0.0, 1.0, ease=True)
+            current_translate_value, _ = self.translate_anim.evaluate()
+            self.translate_anim = ValueAnimation(current_translate_value, 0.0, 1.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+        rw, rh = _get_renderer_dimensions(renderer)
+
+        fade_value, fade_animation_done = self.fade_anim.evaluate()
+        translate_value, translate_animation_done = self.translate_anim.evaluate()
+
+        sw = float(self.image.width)
+        sh = float(self.image.height)
+
+        sx = rw / sw
+        sy = rh / sh
+        s = min(sx, sy) * self.height_pct
+
+        dw = sw * s
+        dh = sh * s
+        dy = (rh - dh) * 0.5
+        dx = -dw + (dw + dy) * translate_value
+
+        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+
+        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(fade_value * 255.0 * self.alpha))
+        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
+
+        if self.stopping and fade_animation_done and translate_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        self.image.cleanup()
 
 
 class ShowImageEffect(Effect):
@@ -836,6 +899,12 @@ def _process_marquee_command(command, render_manager):
         image_path = Path(args['image'])
         if image_path.is_file():
             effect = ShowImageEffect(render_manager.renderer, args['image'])
+            render_manager.add_effect(effect)
+
+    elif name == COMMAND_FLYOUT:
+        image_path = Path(args['image'])
+        if image_path.is_file():
+            effect = FlyoutEffect(render_manager.renderer, args['image'], args['alpha'], args['height'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_PULSE_IMAGE:
