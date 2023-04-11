@@ -75,11 +75,12 @@ def show_image(image_path: str):
         'image': image_path}))
 
 
-def flyout(image_path: str, alpha: float, height: float):
+def flyout(image_path: str, alpha: float, height: float, margin: float = None):
     return _send_marquee_command(_make_command(COMMAND_FLYOUT, {
         'image': image_path,
         'alpha': alpha,
-        'height': height}))
+        'height': height,
+        'margin': margin}))
 
 
 def pulse_image(image_path: str):
@@ -360,10 +361,11 @@ class FlyoutEffect(Effect):
     """
     Effect for displaying an image
     """
-    def __init__(self, renderer, image_path, alpha, height_pct):
+    def __init__(self, renderer, image_path, alpha, height_pct, margin):
         _, h = _get_renderer_dimensions(renderer)
         self.alpha = alpha
         self.height_pct = height_pct
+        self.margin = margin
         self.image = Image(renderer, image_path, height=h)
         self.fade_anim = ValueAnimation(0.0, 1.0, 2.0, ease=True)
         self.translate_anim = ValueAnimation(0.0, 1.0, 4.0, ease=True)
@@ -397,7 +399,9 @@ class FlyoutEffect(Effect):
         dw = sw * s
         dh = sh * s
         dy = (rh - dh) * 0.5
-        dx = -dw + (dw + dy) * translate_value
+
+        margin = self.margin if self.margin is not None else dy
+        dx = -dw + (dw + margin) * translate_value
 
         dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
@@ -904,7 +908,7 @@ def _process_marquee_command(command, render_manager):
     elif name == COMMAND_FLYOUT:
         image_path = Path(args['image'])
         if image_path.is_file():
-            effect = FlyoutEffect(render_manager.renderer, args['image'], args['alpha'], args['height'])
+            effect = FlyoutEffect(render_manager.renderer, args['image'], args['alpha'], args['height'], args.get('margin'))
             render_manager.add_effect(effect)
 
     elif name == COMMAND_PULSE_IMAGE:
