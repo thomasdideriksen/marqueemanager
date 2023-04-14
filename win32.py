@@ -85,14 +85,7 @@ def set_foreground_window(hwnd):
 
 def get_foreground_window():
     return user32.GetForegroundWindow()
-
-
-
-from time import sleep
-sleep(2.0)
-hwnds = enumerate_hwnds(visible_only=True)
-for hwnd in hwnds:
-    path = get_executable_path(hwnd)
-    if path and 'chime.exe' in path.lower():
-        print(get_window_title(hwnd))
-        set_foreground_window(hwnd)
+    
+    
+def is_minimized(hwnd):
+    return user32.IsIconic(hwnd) != 0
