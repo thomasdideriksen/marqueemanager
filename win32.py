@@ -59,6 +59,7 @@ def get_executable_path(hwnd):
             raise RuntimeError('GetProcessImageFileNameW failed')
         result = path_buffer.value
         del path_buffer
+        kernel32.CloseHandle(handle)
 
     return result
 
