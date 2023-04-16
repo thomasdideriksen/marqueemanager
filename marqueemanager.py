@@ -366,7 +366,7 @@ class FlyoutEffect(Effect):
         self.alpha = alpha
         self.height_pct = height_pct
         self.margin = margin
-        self.image = Image(renderer, image_path, height=h)
+        self.image = Image(renderer, image_path, height=int(h * height_pct))
         self.fade_anim = ValueAnimation(0.0, 1.0, 2.0, ease=True)
         self.translate_anim = ValueAnimation(0.0, 1.0, 4.0, ease=True)
         self.stopping = False
