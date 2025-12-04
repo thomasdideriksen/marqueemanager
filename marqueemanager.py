@@ -82,9 +82,10 @@ def vertical_scroll_images(image_paths: list[str]):
         'images': image_paths}))
 
 
-def show_image(image_path: str):
+def show_image(image_path: str, margin: float):
     return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
-        'image': image_path}))
+        'image': image_path,
+        'margin': margin}))
 
 
 def flyout(image_path: str, alpha: float, height: float, margin: float):
@@ -429,8 +430,9 @@ class ShowImageEffect(Effect):
     """
     Effect for displaying an image
     """
-    def __init__(self, renderer, image_path):
+    def __init__(self, renderer, image_path, margin):
         _, h = _get_renderer_dimensions(renderer)
+        self.margin = margin
         self.image = Image(renderer, image_path, height=h)
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
         self.stopping = False
@@ -451,16 +453,7 @@ class ShowImageEffect(Effect):
         sw = float(self.image.width)
         sh = float(self.image.height)
 
-        sx = rw / sw
-        sy = rh / sh
-        s = min(sx, sy)
-
-        dw = sw * s
-        dh = sh * s
-        dx = (rw - dw) * 0.5
-        dy = (rh - dh) * 0.5
-
-        dst_rect = sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
+        dst_rect = _get_fit_rect(sw, sh, rw, rh, margin=self.margin)
 
         value, fade_animation_done = self.fade_anim.evaluate()
 
@@ -912,7 +905,7 @@ def _process_marquee_command(command, render_manager):
     elif name == COMMAND_SHOW_IMAGE:
         image_path = Path(args['image'])
         if image_path.is_file():
-            effect = ShowImageEffect(render_manager.renderer, args['image'])
+            effect = ShowImageEffect(render_manager.renderer, args['image'], args['margin'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_FLYOUT:

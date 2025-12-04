@@ -10,5 +10,4 @@ if mm.start_marquee() >= 0:
 
     #mm.clear()
     #mm.set_background_color(random.random(), random.random(), random.random())
-    #print(sys.argv)
-    pass
+    print(sys.argv)
