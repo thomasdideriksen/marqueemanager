@@ -16,6 +16,8 @@ COMMAND_PLAY_VIDEO = 'playvideo'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
+COMMAND_SET_STATE = 'setstate'
+COMMAND_GET_STATE = 'getstate'
 COMMAND_CLOSE = 'close'
 COMMAND_NOOP = 'noop'
 
@@ -126,6 +128,17 @@ def close():
     return _send_marquee_command(_make_command(COMMAND_CLOSE))
 
 
+def set_state(key, value):
+    return _send_marquee_command(_make_command(COMMAND_SET_STATE, {
+        'key': key,
+        'value': value }))
+
+
+def get_state(key):
+    return _send_marquee_command_and_receive_response(_make_command(COMMAND_GET_STATE, {
+        'key': key}))
+
+
 def _make_command(command_name, arguments=None):
     return {
         'name': command_name,
@@ -163,6 +176,33 @@ def _get_fit_rect(iw, ih, rw, rh, fit=FIT_FIT, margin=0):
     return sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
 
+def _send_on_socket(sock, payload):
+    """
+    Serialize and send payload via socket
+    """
+    buffer = pickle.dumps(payload)
+    buffer_size_bytes = struct.pack('<Q', len(buffer))
+    sock.sendall(buffer_size_bytes)
+    sock.sendall(buffer)
+
+
+def _receive_on_socket(connection):
+    """
+    Receive and de-serialize payload via socket
+    """
+    def receive(connection, byte_count):
+        result = b''
+        while len(result) < byte_count:
+            chunk = connection.recv(byte_count - len(result))
+            if chunk:
+                result += chunk
+        return result
+    buffer_size_bytes = receive(connection, 8)
+    buffer_size = struct.unpack('<Q', buffer_size_bytes)[0]
+    buffer = receive(connection, buffer_size)
+    return pickle.loads(buffer)
+
+
 def _send_marquee_command(command):
     """
     Send command to marquee process. Used by clients (including other
@@ -173,13 +213,25 @@ def _send_marquee_command(command):
         try:
             sock.settimeout(TIMEOUT)
             sock.connect((HOST, PORT))
-            buffer = pickle.dumps(command)
-            buffer_size_bytes = struct.pack('<Q', len(buffer))
-            sock.sendall(buffer_size_bytes)
-            sock.sendall(buffer)
+            _send_on_socket(sock, command)
             return True
         except (ConnectionRefusedError, TimeoutError) as ex:
             return False
+
+
+def _send_marquee_command_and_receive_response(command):
+    """
+    Similar to "_send_marquee_command", but this one receives a response too
+    """
+    TIMEOUT = 0.5
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.settimeout(TIMEOUT)
+            sock.connect((HOST, PORT))
+            _send_on_socket(sock, command)
+            return _receive_on_socket(sock)
+        except (ConnectionRefusedError, TimeoutError) as ex:
+            return None
 
 
 class Animation(ABC):
@@ -968,14 +1020,7 @@ def _run_command_listener(command_queue):
     Run the command listener
     """
 
-    # Helper function for receiving data
-    def receive(connection, byte_count):
-        result = b''
-        while len(result) < byte_count:
-            chunk = connection.recv(byte_count - len(result))
-            if chunk:
-                result += chunk
-        return result
+    state = {}
 
     # Create socket
     TIMEOUT = 0.5
@@ -988,13 +1033,22 @@ def _run_command_listener(command_queue):
         while True:
             try:
                 connection, _ = sock.accept()
-                buffer_size_bytes = receive(connection, 8)
-                buffer_size = struct.unpack('<Q', buffer_size_bytes)[0]
-                buffer = receive(connection, buffer_size)
-                command = pickle.loads(buffer)
-                command_queue.put(command)
-                if command['name'] == COMMAND_CLOSE:
-                    break
+                command = _receive_on_socket(connection)
+
+                name = command['name']
+                args = command['arguments']
+
+                if name == COMMAND_SET_STATE:
+                    state[args['key']] = args['value']
+
+                elif name == COMMAND_GET_STATE:
+                    _send_on_socket(connection, state.get(args['key']))
+
+                else:
+                    command_queue.put(command)
+                    if name == COMMAND_CLOSE:
+                        break
+
             except TimeoutError:
                 continue
 
