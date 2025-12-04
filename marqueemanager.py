@@ -970,7 +970,7 @@ def _process_events(events):
     return True
 
 
-def _run_command_listener(command_queue, command_listener_thread_ready):
+def _run_command_listener(command_queue):
     """
     Run the command listener
     """
@@ -990,7 +990,6 @@ def _run_command_listener(command_queue, command_listener_thread_ready):
         sock.bind((HOST, PORT))
         sock.settimeout(TIMEOUT)
         sock.listen(1)
-        command_listener_thread_ready.set()
 
         # Main receive loop
         while True:
@@ -1067,11 +1066,10 @@ def _main():
     command_queue = Queue()
 
     # Start the command listener thread
-    command_listener_thread_ready = Event()
     command_listener_thread = Thread(
         target=_run_command_listener,
         name='Marquee command listener thread',
-        args=(command_queue, command_listener_thread_ready),
+        args=(command_queue,),
         daemon=True)
     command_listener_thread.start()
 

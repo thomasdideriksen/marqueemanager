@@ -26,11 +26,13 @@ def rom_name_from_rom_path(rom_path):
 
 
 def get_video_path_for(rom_system, rom_name):
-    return os.path.join(ES_ROOT, 'downloaded_media', rom_system, 'videos', f'{rom_name}.mp4')
+    result = os.path.join(ES_ROOT, 'downloaded_media', rom_system, 'videos', f'{rom_name}.mp4')
+    return result.replace('\\', '')
 
 
 def get_marquee_image_path_for(rom_system, rom_name):
-    return os.path.join(ES_ROOT, 'downloaded_media', rom_system, 'marquees', f'{rom_name}.png')
+    result = os.path.join(ES_ROOT, 'downloaded_media', rom_system, 'marquees', f'{rom_name}.png')
+    return result.replace('\\', '')
 
 
 def get_logo_paths():
