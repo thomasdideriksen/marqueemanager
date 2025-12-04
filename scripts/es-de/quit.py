@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import sys
-ROOT = '/home/thomas/Arcade/marqueemanager'
-sys.path.append(ROOT)
-import marqueemanager as mm
+import utils
+
+
+mm = utils.get_marquee_manager()
 mm.close()

@@ -2,10 +2,10 @@
 
 import os
 import sys
+import utils
 
-ROOT = '/home/thomas/Arcade/marqueemanager'
-sys.path.append(ROOT)
-import marqueemanager as mm
+
+mm = utils.get_marquee_manager()
 
 if mm.start_marquee() >= 0:
 
@@ -14,18 +14,15 @@ if mm.start_marquee() >= 0:
 
     rom_path = sys.argv[1]
     rom_system = sys.argv[3]
-    rom_name = os.path.splitext(os.path.basename(rom_path))[0]
+    rom_name = utils.rom_name_from_rom_path(rom_path)
 
-    video_path = f'/home/thomas/ES-DE/downloaded_media/{rom_system}/videos/{rom_name}.mp4'
-    video_path = video_path.replace('\\', '')
-
+    video_path = utils.get_video_path_for(rom_system, rom_name)
     if os.path.isfile(video_path):
         mm.play_video(video_path, margin=0, alpha=0.35, fit='fill')
 
-    marquee_image_path = f'/home/thomas/ES-DE/downloaded_media/{rom_system}/marquees/{rom_name}.png'
-    marquee_image_path = marquee_image_path.replace('\\', '')
-
+    marquee_image_path = utils.get_marquee_image_path_for(rom_system, rom_name)
     if os.path.isfile(marquee_image_path):
         mm.pulse_image(marquee_image_path)
 
-    mm.flyout(f'{ROOT}/graphics/buttons_flattened.svg', 0.6, 0.45, 8)
+    info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_flattened.svg')
+    mm.flyout(info_img_path, 0.6, 0.45, 8)

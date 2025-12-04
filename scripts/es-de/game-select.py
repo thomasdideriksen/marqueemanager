@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
-import random
-import os
+import utils
 
-ROOT = '/home/thomas/Arcade/marqueemanager'
-sys.path.append(ROOT)
-import marqueemanager as mm
+
+mm = utils.get_marquee_manager()
 
 if mm.start_marquee() >= 0:
 
@@ -16,12 +14,10 @@ if mm.start_marquee() >= 0:
         game_name = sys.argv[2]
         sys_name = sys.argv[3]
         sys_full_name = sys.argv[4]
-        rom_name = os.path.splitext(os.path.basename(rom_path))[0]
+        rom_name = utils.rom_name_from_rom_path(rom_path)
 
-        marquee_image_path = f'/home/thomas/ES-DE/downloaded_media/{sys_name}/marquees/{rom_name}.png'
-        marquee_image_path = marquee_image_path.replace('\\', '')
+        marquee_image_path = utils.get_marquee_image_path_for(sys_name, rom_name)
 
         mm.clear()
-        mm.set_background_color(random.random(), random.random(), random.random())
-
-        mm.horizontal_scroll_images([marquee_image_path], 100.2, False, 0, 0)
+        mm.set_background_color(0, 0, 0)
+        mm.show_image(marquee_image_path)
