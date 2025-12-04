@@ -3,10 +3,10 @@ import socket
 import struct
 import time
 import pickle
+import os
 
 HOST = 'localhost'
 PORT = 6000
-READY_MSG = 'marquee ready'
 
 COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'showimage'
@@ -31,8 +31,6 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     """
     Start the marquee process
     """
-    import subprocess
-    import sys
 
     # This checks if a marquee process is already running. This is
     # not really concurrency safe, i.e. if two processes call start_marquee
@@ -40,20 +38,34 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     if noop():
         return 0
 
+    import subprocess
+    import sys
+
     # Start the marquee process
+    flags = subprocess.DETACHED_PROCESS if os.name == 'nt' else 0
     process = subprocess.Popen(
         [sys.executable, __file__, str(display_idx)],
-        creationflags=subprocess.DETACHED_PROCESS,
+        creationflags=flags,
         stdout=subprocess.PIPE)
 
     # Wait for the marquee process/window to be ready
+    t0 = time.time()
     while True:
         if process.poll() != None:
             # If the marquee process crashed we return false
             return -1
-        line = process.stdout.readline().decode('utf8').strip()
-        if line == READY_MSG:
+
+        # Give up after a while if the marquee process isn't responding
+        MAX_WAIT_TIME_SECONDS = 6
+        elapsed = time.time() - t0
+        if elapsed > MAX_WAIT_TIME_SECONDS:
+            return -1
+
+        # Check if the marquee process is ready to receive commands
+        if noop():
             return 1
+        else:
+            time.sleep(0.1)
 
 
 def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
@@ -846,7 +858,7 @@ def _open_marquee_window(display_idx=DISPLAY_ONLY_MARQUEE):
         bounds.w, bounds.h,
         sdl2.SDL_WINDOW_BORDERLESS | sdl2.SDL_WINDOW_VULKAN)
 
-    sdl2.SDL_SetWindowAlwaysOnTop(window, True)
+    #sdl2.SDL_SetWindowAlwaysOnTop(window, True) - this may grab focus in some cases (I think)
     sdl2.SDL_ShowCursor(sdl2.SDL_DISABLE)
 
     renderer = sdl2.SDL_CreateRenderer(
@@ -1065,12 +1077,6 @@ def _main():
 
     # Create render manager
     render_manager = RenderManager(renderer)
-
-    # A parent process may listen for this (i.e. via a pipe) to
-    # know when the marquee window has been created
-    command_listener_thread_ready.wait()
-    sys.stdout.write(f'{READY_MSG}\r\n')
-    sys.stdout.flush()
 
     # Enter main loop
     while True:
