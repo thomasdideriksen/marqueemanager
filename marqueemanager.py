@@ -18,6 +18,7 @@ COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
 COMMAND_SET_STATE = 'setstate'
 COMMAND_GET_STATE = 'getstate'
+COMMAND_CLEAR_QUEUE = 'clearqueue'
 COMMAND_CLOSE = 'close'
 COMMAND_NOOP = 'noop'
 
@@ -137,6 +138,10 @@ def set_state(key, value):
 def get_state(key):
     return _send_marquee_command_and_receive_response(_make_command(COMMAND_GET_STATE, {
         'key': key}))
+
+
+def clear_queue():
+    return _send_marquee_command(_make_command(COMMAND_CLEAR_QUEUE))
 
 
 def _make_command(command_name, arguments=None):
@@ -1045,6 +1050,12 @@ def _run_command_listener(command_queue):
                 elif name == COMMAND_GET_STATE:
                     _send_on_socket(connection, state.get(args['key']))
 
+                elif name == COMMAND_CLEAR_QUEUE:
+                    while True:
+                        command = _dequeue_command(command_queue)
+                        if (command is None):
+                            break
+
                 else:
                     command_queue.put(command)
                     if name == COMMAND_CLOSE:
@@ -1102,6 +1113,18 @@ class RenderManager(object):
         sdl2.SDL_RenderPresent(self.renderer)
 
 
+def _dequeue_command(queue):
+    """
+    Dequeue command; if the queue is empty return None
+    """
+    command = None
+    try:
+        command = queue.get(block=False)
+    except Empty:
+        pass
+    return command
+
+
 def _main():
     """
     Main entry point
@@ -1132,9 +1155,11 @@ def _main():
         if not _process_events(events):
             close()
 
-        # Process commands
-        if not command_queue.empty():
-            command = command_queue.get(block=False)
+        # Get command
+        command = _dequeue_command(command_queue)
+
+        # Process command
+        if command is not None:
             try:
                 if not _process_marquee_command(command, render_manager):
                     break
@@ -1163,7 +1188,7 @@ if __name__ == "__main__":
     from sdl2.ext.err import SDLError
     from ctypes import c_int, byref
     from threading import Thread, Event
-    from queue import Queue
+    from queue import Queue, Empty
     from multiprocessing.connection import Listener
     from pathlib import Path
     import math

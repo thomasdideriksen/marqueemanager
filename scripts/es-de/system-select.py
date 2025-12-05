@@ -3,17 +3,19 @@
 import sys
 import utils
 
+SYSTEM_SELECT_EVENT = 'system-select'
 
-mm = utils.get_marquee_manager()
+if len(sys.argv) > 1:
 
-if mm.start_marquee() >= 0:
+    mm = utils.get_marquee_manager()
 
-    #mm.clear()
-    #mm.set_background_color(random.random(), random.random(), random.random())
+    if mm.start_marquee() >= 0:
 
+        last_event = utils.get_last_event()
 
-    last_event = utils.get_last_event()
+        if last_event != SYSTEM_SELECT_EVENT:
 
-    print(f'[last event: {last_event}] {sys.argv}')
+            print('Do something!')
+            # TODO
 
-    utils.set_last_event('system-select')
+utils.set_last_event(SYSTEM_SELECT_EVENT)

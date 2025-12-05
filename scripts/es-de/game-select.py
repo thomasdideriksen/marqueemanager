@@ -2,13 +2,13 @@
 
 import sys
 import utils
+import os
 
+if len(sys.argv) > 1:
 
-mm = utils.get_marquee_manager()
+    mm = utils.get_marquee_manager()
 
-if mm.start_marquee() >= 0:
-
-    if len(sys.argv) > 1:
+    if mm.start_marquee() >= 0:
 
         rom_path = sys.argv[1]
         game_name = sys.argv[2]
@@ -21,8 +21,12 @@ if mm.start_marquee() >= 0:
 
         mm.clear()
         mm.set_background_color(0, 0, 0)
-        mm.play_video(video_path, 0, 0.35, 'fill')
-        mm.show_image(marquee_image_path, 48)
 
-        utils.set_last_event('game-select')
+        if os.path.isfile(video_path):
+            mm.play_video(video_path, 0, 0.35, 'fill')
+
+        if os.path.isfile(marquee_image_path):
+            mm.show_image(marquee_image_path, 48)
+
+utils.set_last_event('game-select')
 
