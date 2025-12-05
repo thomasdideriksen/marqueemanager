@@ -10,4 +10,10 @@ if mm.start_marquee() >= 0:
 
     #mm.clear()
     #mm.set_background_color(random.random(), random.random(), random.random())
-    print(sys.argv)
+
+
+    last_event = utils.get_last_event()
+
+    print(f'[last event: {last_event}] {sys.argv}')
+
+    utils.set_last_event('system-select')

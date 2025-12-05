@@ -17,3 +17,5 @@ if mm.start_marquee() >= 0:
 
     info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
     mm.flyout(info_img_path, 0.6, 0.45, 8)
+
+    utils.set_last_event('startup')

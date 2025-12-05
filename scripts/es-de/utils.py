@@ -4,9 +4,18 @@ import os
 
 MM_ROOT = '/home/thomas/Arcade/marqueemanager'
 ES_ROOT = '/home/thomas/ES-DE'
+LAST_EVENT_KEY = '_last_event'
 
 sys.path.append(MM_ROOT)
 import marqueemanager as mm
+
+
+def set_last_event(event):
+    mm.set_state(LAST_EVENT_KEY, event)
+
+
+def get_last_event():
+    return mm.get_state(LAST_EVENT_KEY)
 
 
 def get_marquee_manager():

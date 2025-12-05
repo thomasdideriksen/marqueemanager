@@ -24,3 +24,5 @@ if mm.start_marquee() >= 0:
         mm.play_video(video_path, 0, 0.35, 'fill')
         mm.show_image(marquee_image_path, 48)
 
+        utils.set_last_event('game-select')
+

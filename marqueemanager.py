@@ -131,7 +131,7 @@ def close():
 def set_state(key, value):
     return _send_marquee_command(_make_command(COMMAND_SET_STATE, {
         'key': key,
-        'value': value }))
+        'value': value}))
 
 
 def get_state(key):
@@ -1020,6 +1020,7 @@ def _run_command_listener(command_queue):
     Run the command listener
     """
 
+    # Client state store
     state = {}
 
     # Create socket
