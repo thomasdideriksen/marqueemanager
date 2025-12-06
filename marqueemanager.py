@@ -19,6 +19,7 @@ COMMAND_BACKGROUND = 'background'
 COMMAND_SET_STATE = 'setstate'
 COMMAND_GET_STATE = 'getstate'
 COMMAND_CLEAR_QUEUE = 'clearqueue'
+COMMAND_COMMAND_LIST = 'commandlist'
 COMMAND_CLOSE = 'close'
 COMMAND_NOOP = 'noop'
 
@@ -91,12 +92,13 @@ def show_image(image_path: str, margin: float):
         'margin': margin}))
 
 
-def flyout(image_path: str, alpha: float, height: float, margin: float):
+def flyout(image_path: str, alpha: float, height: float, margin: float, delay: float):
     return _send_marquee_command(_make_command(COMMAND_FLYOUT, {
         'image': image_path,
         'alpha': alpha,
         'height': height,
-        'margin': margin}))
+        'margin': margin,
+        'delay': delay}))
 
 
 def pulse_image(image_path: str):
@@ -115,6 +117,11 @@ def play_video(video_path: str, margin: float, alpha: float, fit: str):
 def set_background_color(r, g, b):
     return _send_marquee_command(_make_command(COMMAND_BACKGROUND, {
         'color': (r, g, b)}))
+
+
+def command_list(commands: list[str]):
+    return _send_marquee_command(_make_command(COMMAND_COMMAND_LIST, {
+        'commands': commands }))
 
 
 def noop():
@@ -148,37 +155,6 @@ def _make_command(command_name, arguments=None):
     return {
         'name': command_name,
         'arguments': arguments}
-
-
-def _get_fit_rect(iw, ih, rw, rh, fit=FIT_FIT, margin=0):
-
-    ih = float(ih)
-    iw = float(iw)
-
-    rh = float(rh)
-    rw = float(rw)
-
-    sx = (rw - 2 * margin) / iw
-    sy = (rh - 2 * margin) / ih
-
-    if fit == FIT_FILL:
-        s = max(sx, sy)
-
-    elif fit == FIT_FIT:
-        s = min(sx, sy)
-
-    elif fit == FIT_STRETCH:
-        return sdl2.SDL_FRect(x=margin, y=margin, w=rw - 2 * margin, h=rh - 2 * margin)
-
-    elif fit == FIT_CENTER:
-        s = 1.0
-
-    dw = iw * s
-    dh = ih * s
-    dx = (rw - dw) * 0.5
-    dy = (rh - dh) * 0.5
-
-    return sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
 
 def _send_on_socket(sock, payload):
@@ -237,6 +213,40 @@ def _send_marquee_command_and_receive_response(command):
             return _receive_on_socket(sock)
         except (ConnectionRefusedError, TimeoutError) as ex:
             return None
+
+#
+# Below here, "server side" rendering logic
+#
+
+def _get_fit_rect(iw, ih, rw, rh, fit=FIT_FIT, margin=0):
+
+    ih = float(ih)
+    iw = float(iw)
+
+    rh = float(rh)
+    rw = float(rw)
+
+    sx = (rw - 2 * margin) / iw
+    sy = (rh - 2 * margin) / ih
+
+    if fit == FIT_FILL:
+        s = max(sx, sy)
+
+    elif fit == FIT_FIT:
+        s = min(sx, sy)
+
+    elif fit == FIT_STRETCH:
+        return sdl2.SDL_FRect(x=margin, y=margin, w=rw - 2 * margin, h=rh - 2 * margin)
+
+    elif fit == FIT_CENTER:
+        s = 1.0
+
+    dw = iw * s
+    dh = ih * s
+    dx = (rw - dw) * 0.5
+    dy = (rh - dh) * 0.5
+
+    return sdl2.SDL_FRect(x=dx, y=dy, w=dw, h=dh)
 
 
 class Animation(ABC):
@@ -431,14 +441,14 @@ class FlyoutEffect(Effect):
     """
     Effect for displaying an image
     """
-    def __init__(self, renderer, image_path, alpha, height_pct, margin):
+    def __init__(self, renderer, image_path, alpha, height_pct, margin, start_delay):
         _, h = _get_renderer_dimensions(renderer)
         self.alpha = alpha
         self.height_pct = height_pct
         self.margin = margin
         self.image = Image(renderer, image_path, height=int(h * height_pct))
         self.fade_anim = ValueAnimation(0.0, 1.0, 2.0, ease=True)
-        self.translate_anim = ValueAnimation(0.0, 1.0, 4.0, ease=True)
+        self.translate_anim = ValueAnimation(0.0, 1.0, 4.0, ease=True, start_delay=start_delay)
         self.stopping = False
         self.stopped = False
 
@@ -943,23 +953,11 @@ def _get_renderer_dimensions(renderer):
 
 
 def _process_marquee_command(command, render_manager):
-    """
-    Process marquee command
-    """
 
     name = command['name']
     args = command['arguments']
 
-    if name == COMMAND_CLOSE:
-        return False
-
-    elif name == COMMAND_NOOP:
-        pass
-
-    elif name == COMMAND_CLEAR:
-        render_manager.stop_all_effects()
-
-    elif name == COMMAND_SHOW_IMAGE:
+    if name == COMMAND_SHOW_IMAGE:
         image_path = Path(args['image'])
         if image_path.is_file():
             effect = ShowImageEffect(render_manager.renderer, args['image'], args['margin'])
@@ -968,7 +966,7 @@ def _process_marquee_command(command, render_manager):
     elif name == COMMAND_FLYOUT:
         image_path = Path(args['image'])
         if image_path.is_file():
-            effect = FlyoutEffect(render_manager.renderer, args['image'], args['alpha'], args['height'], args['margin'])
+            effect = FlyoutEffect(render_manager.renderer, args['image'], args['alpha'], args['height'], args['margin'], args['delay'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_PULSE_IMAGE:
@@ -1003,6 +1001,19 @@ def _process_marquee_command(command, render_manager):
         if Path(args['video']).is_file():
             effect = VideoPlaybackEffect(render_manager.renderer, args['video'], args['margin'], args['alpha'], args['fit'])
             render_manager.add_effect(effect)
+
+    elif name == COMMAND_CLEAR:
+        render_manager.stop_all_effects()
+
+    elif name == COMMAND_NOOP:
+        pass
+
+    elif name == COMMAND_COMMAND_LIST:
+        for child_command in args['commands']:
+            _process_marquee_command(child_command, render_manager)
+
+    elif name == COMMAND_CLOSE:
+        return False
 
     return True
 
@@ -1052,8 +1063,9 @@ def _run_command_listener(command_queue):
 
                 elif name == COMMAND_CLEAR_QUEUE:
                     while True:
-                        command = _dequeue_command(command_queue)
-                        if (command is None):
+                        try:
+                            command_queue.get_nowait()
+                        except Empty:
                             break
 
                 else:
@@ -1117,12 +1129,10 @@ def _dequeue_command(queue):
     """
     Dequeue command; if the queue is empty return None
     """
-    command = None
     try:
-        command = queue.get(block=False)
+        return queue.get(block=False)
     except Empty:
-        pass
-    return command
+        return None
 
 
 def _main():

@@ -4,6 +4,9 @@ import sys
 import utils
 import os
 
+EVENT_NAME = 'game-select'
+print(EVENT_NAME)
+
 if len(sys.argv) > 1:
 
     mm = utils.get_marquee_manager()
@@ -19,14 +22,14 @@ if len(sys.argv) > 1:
         marquee_image_path = utils.get_marquee_image_path_for(sys_name, rom_name)
         video_path = utils.get_video_path_for(sys_name, rom_name)
 
+        mm.clear_queue()
         mm.clear()
         mm.set_background_color(0, 0, 0)
 
-        if os.path.isfile(video_path):
-            mm.play_video(video_path, 0, 0.35, 'fill')
+        mm.play_video(video_path, 0, 0.35, 'fill')
+        mm.show_image(marquee_image_path, 48)
 
-        if os.path.isfile(marquee_image_path):
-            mm.show_image(marquee_image_path, 48)
+        info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
+        mm.flyout(info_img_path, 0.6, 0.45, 8, 1.5)
 
-utils.set_last_event('game-select')
-
+utils.set_last_event(EVENT_NAME)
