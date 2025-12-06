@@ -18,7 +18,6 @@ COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
 COMMAND_SET_STATE = 'setstate'
 COMMAND_GET_STATE = 'getstate'
-COMMAND_CLEAR_QUEUE = 'clearqueue'
 COMMAND_COMMAND_LIST = 'commandlist'
 COMMAND_CLOSE = 'close'
 COMMAND_NOOP = 'noop'
@@ -72,51 +71,78 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
             time.sleep(0.1)
 
 
-def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
-    return _send_marquee_command(_make_command(COMMAND_HORZ_SCROLL_IMAGES, {
+def horizontal_scroll_images_command(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
+    return _make_command(COMMAND_HORZ_SCROLL_IMAGES, {
         'images': image_paths,
         'speed': speed,
         'reverse': reverse,
         'margin': margin,
-        'spacing': spacing}))
+        'spacing': spacing})
+
+def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
+    return _send_marquee_command(horizontal_scroll_images_command(image_paths, speed, reverse, margin, spacing))
+
+
+def vertical_scroll_images_command(image_paths: list[str]):
+    return _make_command(COMMAND_VERT_SCROLL_IMAGES, {
+        'images': image_paths})
 
 
 def vertical_scroll_images(image_paths: list[str]):
-    return _send_marquee_command(_make_command(COMMAND_VERT_SCROLL_IMAGES, {
-        'images': image_paths}))
+    return _send_marquee_command(vertical_scroll_images_command(image_paths))
+
+
+def show_image_command(image_path: str, margin: float):
+    return _make_command(COMMAND_SHOW_IMAGE, {
+        'image': image_path,
+        'margin': margin})
 
 
 def show_image(image_path: str, margin: float):
-    return _send_marquee_command(_make_command(COMMAND_SHOW_IMAGE, {
-        'image': image_path,
-        'margin': margin}))
+    return _send_marquee_command(show_image_command(image_path, margin))
 
 
-def flyout(image_path: str, alpha: float, height: float, margin: float, delay: float):
-    return _send_marquee_command(_make_command(COMMAND_FLYOUT, {
+def flyout_command(image_path: str, alpha: float, height: float, margin: float, delay: float):
+    return _make_command(COMMAND_FLYOUT, {
         'image': image_path,
         'alpha': alpha,
         'height': height,
         'margin': margin,
-        'delay': delay}))
+        'delay': delay})
+
+
+def flyout(image_path: str, alpha: float, height: float, margin: float, delay: float):
+    return _send_marquee_command(flyout_command(image_path, alpha, height, margin, delay))
+
+
+def pulse_image_command(image_path: str):
+    return _make_command(COMMAND_PULSE_IMAGE, {
+        'image': image_path})
 
 
 def pulse_image(image_path: str):
-    return _send_marquee_command(_make_command(COMMAND_PULSE_IMAGE, {
-        'image': image_path}))
+    return _send_marquee_command(pulse_image_command(image_path))
 
 
-def play_video(video_path: str, margin: float, alpha: float, fit: str):
-    return _send_marquee_command(_make_command(COMMAND_PLAY_VIDEO, {
+def play_video_command(video_path: str, margin: float, alpha: float, fit: str):
+    return _make_command(COMMAND_PLAY_VIDEO, {
         'video': video_path,
         'margin': margin,
         'alpha': alpha,
-        'fit': fit}))
+        'fit': fit})
+
+
+def play_video(video_path: str, margin: float, alpha: float, fit: str):
+    return _send_marquee_command(play_video_command(video_path, margin, alpha, fit))
+
+
+def set_background_color_command(r, g, b):
+    return _make_command(COMMAND_BACKGROUND, {
+        'color': (r, g, b)})
 
 
 def set_background_color(r, g, b):
-    return _send_marquee_command(_make_command(COMMAND_BACKGROUND, {
-        'color': (r, g, b)}))
+    return _send_marquee_command(set_background_color_command(r, g, b))
 
 
 def command_list(commands: list[str]):
@@ -128,27 +154,31 @@ def noop():
     return _send_marquee_command(_make_command(COMMAND_NOOP))
 
 
+def clear_command():
+    return _make_command(COMMAND_CLEAR)
+
+
 def clear():
-    return _send_marquee_command(_make_command(COMMAND_CLEAR))
+    return _send_marquee_command(clear_command())
 
 
 def close():
     return _send_marquee_command(_make_command(COMMAND_CLOSE))
 
 
-def set_state(key, value):
-    return _send_marquee_command(_make_command(COMMAND_SET_STATE, {
+def set_state_command(key, value):
+    return _make_command(COMMAND_SET_STATE, {
         'key': key,
-        'value': value}))
+        'value': value})
+
+
+def set_state(key, value):
+    return _send_marquee_command(set_state_command(key, value))
 
 
 def get_state(key):
     return _send_marquee_command_and_receive_response(_make_command(COMMAND_GET_STATE, {
         'key': key}))
-
-
-def clear_queue():
-    return _send_marquee_command(_make_command(COMMAND_CLEAR_QUEUE))
 
 
 def _make_command(command_name, arguments=None):
@@ -543,19 +573,12 @@ class VideoPlaybackEffect(Effect):
         self.fit = fit
         self.margin = margin
         self.alpha = alpha
-        self.fade_anim = ValueAnimation(0.0, 1.0, 1.5, ease=True)
-
+        self.fade_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
         self.t0 = time.time()
         self.last_frame = None
         self.next_frame_idx = 0
-
-        self.video = cv2.VideoCapture(video_path)
-        self.fps = self.video.get(cv2.CAP_PROP_FPS)
-        w = self.video.get(cv2.CAP_PROP_FRAME_WIDTH)
-        h = self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)
-
-        self.surface = sdl2.SDL_CreateRGBSurface(0, int(w), int(h), 24, 0, 0, 0, 0)
-        self.surface_access = sdl2.ext.pixelaccess.pixels3d(self.surface, transpose=False)
+        self.video_path = video_path
+        self.video_loaded = False
 
         self.stopping = False
         self.stopped = False
@@ -575,6 +598,17 @@ class VideoPlaybackEffect(Effect):
         self.next_frame_idx = 0
 
     def render(self, renderer):
+
+        # Load video on demand
+        if not self.video_loaded:
+            self.video = cv2.VideoCapture(self.video_path)
+            self.fps = self.video.get(cv2.CAP_PROP_FPS)
+            w = self.video.get(cv2.CAP_PROP_FRAME_WIDTH)
+            h = self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+            self.surface = sdl2.SDL_CreateRGBSurface(0, int(w), int(h), 24, 0, 0, 0, 0)
+            self.surface_access = sdl2.ext.pixelaccess.pixels3d(self.surface, transpose=False)
+            self.video_loaded = True
 
         # Compute desired frame index
         dt = time.time() - self.t0
@@ -1061,13 +1095,6 @@ def _run_command_listener(command_queue):
                 elif name == COMMAND_GET_STATE:
                     _send_on_socket(connection, state.get(args['key']))
 
-                elif name == COMMAND_CLEAR_QUEUE:
-                    while True:
-                        try:
-                            command_queue.get_nowait()
-                        except Empty:
-                            break
-
                 else:
                     command_queue.put(command)
                     if name == COMMAND_CLOSE:
@@ -1079,10 +1106,11 @@ def _run_command_listener(command_queue):
 
 class RenderManager(object):
 
-    def __init__(self, renderer):
+    def __init__(self, renderer, max_effects_count):
         self.effects = []
         self.renderer = renderer
         self.color_anim = ColorAnimation((0, 0, 0), (0, 0, 0), 0)
+        self.max_effects_count = max_effects_count
 
     def add_effect(self, effect):
         self.effects.append(effect)
@@ -1113,9 +1141,13 @@ class RenderManager(object):
         sdl2.SDL_RenderClear(self.renderer)
 
         effects_to_remove = []
-        for effect in self.effects:
+        for idx, effect in enumerate(self.effects):
             effect.render(self.renderer)
-            if effect.is_stopped():
+
+            # Note: Prune oldest effects if we exceed the max allowed limit
+            prune_effect = len(self.effects) > self.max_effects_count and idx < len(self.effects) - self.max_effects_count
+
+            if effect.is_stopped() or prune_effect:
                 effect.cleanup()
                 effects_to_remove.append(effect)
 
@@ -1155,7 +1187,8 @@ def _main():
     command_listener_thread.start()
 
     # Create render manager
-    render_manager = RenderManager(renderer)
+    MAX_EFFECT_COUNT = 10
+    render_manager = RenderManager(renderer, MAX_EFFECT_COUNT)
 
     # Enter main loop
     while True:

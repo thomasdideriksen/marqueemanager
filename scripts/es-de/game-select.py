@@ -21,15 +21,14 @@ if len(sys.argv) > 1:
 
         marquee_image_path = utils.get_marquee_image_path_for(sys_name, rom_name)
         video_path = utils.get_video_path_for(sys_name, rom_name)
-
-        mm.clear_queue()
-        mm.clear()
-        mm.set_background_color(0, 0, 0)
-
-        mm.play_video(video_path, 0, 0.35, 'fill')
-        mm.show_image(marquee_image_path, 48)
-
         info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
-        mm.flyout(info_img_path, 0.6, 0.45, 8, 1.5)
+
+        mm.command_list([
+            mm.clear_command(),
+            mm.set_background_color_command(0.25, 0.25, 0.25),
+            mm.play_video_command(video_path, 0, 0.45, 'fill'),
+            mm.show_image_command(marquee_image_path, 48),
+            mm.flyout_command(info_img_path, 0.6, 0.45, 8, 1.5),
+        ])
 
 utils.set_last_event(EVENT_NAME)

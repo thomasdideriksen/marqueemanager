@@ -5,8 +5,6 @@ import utils
 EVENT_NAME = 'game-end'
 print(EVENT_NAME)
 
-# mm = utils.get_marquee_manager()
-# if mm.start_marquee() >= 0:
-#     mm.clear()
+# Note: Nothing to do here (for now), since the "game-select" event handles game termination
 
 utils.set_last_event(EVENT_NAME)
