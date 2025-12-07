@@ -20,14 +20,15 @@ if len(sys.argv) > 1:
         if last_event != EVENT_NAME:
 
             mm.clear()
-            mm.set_background_color(0.85, 0.85, 0.85)
+
+            mm.set_background_color(0.25, 0.25, 0.25),
 
             video_path = utils.get_random_video_path()
-            mm.play_video(video_path, margin=0, alpha=0.35, fit='fill')
+            mm.play_video(video_path, 0, 0.45, 'fill'),
 
             images = utils.get_logo_paths()
             random.shuffle(images)
-            mm.horizontal_scroll_images(images, 180, True, 80, 110)
+            mm.horizontal_scroll_images(images, 180, True, 120, 80)
 
             info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
             mm.flyout(info_img_path, 0.6, 0.45, 8, 3)
