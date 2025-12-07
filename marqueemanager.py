@@ -407,20 +407,19 @@ class Image(object):
 
         MAX_DIM = 8192
         if path.lower().endswith('.svg'):
-            surf = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
+            self.surface = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
             # Don't exceed max allowed texture size
-            if surf.w > MAX_DIM or surf.h > MAX_DIM:
-                sx = MAX_DIM / float(surf.w)
-                sy = MAX_DIM / float(surf.h)
+            if self.surface.w > MAX_DIM or self.surface.h > MAX_DIM:
+                sx = MAX_DIM / float(self.surface.w)
+                sy = MAX_DIM / float(self.surface.h)
                 s = min(sx, sy)
-                sdl2.SDL_FreeSurface(surf)
-                surf = sdl2.ext.image.load_svg(path, int(width * s), int(height * s), as_argb=True)
-            self.surface = surf
+                sdl2.SDL_FreeSurface(self.surface)
+                self.surface = sdl2.ext.image.load_svg(path, int(width * s), int(height * s), as_argb=True)
         else:
             self.surface = sdl2.ext.image.load_img(path, as_argb=True)
 
-        assert self.surface.w < MAX_DIM
-        assert self.surface.h < MAX_DIM
+        assert self.surface.w <= MAX_DIM
+        assert self.surface.h <= MAX_DIM
 
         self.tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
         sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
