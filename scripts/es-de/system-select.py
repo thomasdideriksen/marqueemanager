@@ -20,7 +20,6 @@ if len(sys.argv) > 1:
         if last_event != EVENT_NAME:
 
             mm.clear()
-
             mm.set_background_color(0.25, 0.25, 0.25),
 
             VIDEO_COUNT = 32
@@ -28,12 +27,11 @@ if len(sys.argv) > 1:
             for _ in range(VIDEO_COUNT):
                 video_paths.append(utils.get_random_video_path())
 
-            print(video_paths)
             mm.play_videos(video_paths, 0, 0.45, 'fill'),
 
-            images = utils.get_logo_paths()
-            random.shuffle(images)
-            mm.horizontal_scroll_images(images, 180, True, 120, 80)
+            logo_images = utils.get_logo_paths()
+            random.shuffle(logo_images)
+            mm.horizontal_scroll_images(logo_images, 180, True, 120, 80)
 
             info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
             mm.flyout(info_img_path, 0.6, 0.45, 8, 3)

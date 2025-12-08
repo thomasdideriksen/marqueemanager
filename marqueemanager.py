@@ -10,6 +10,7 @@ PORT = 6000
 
 COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'showimage'
+COMMAND_GROW_IMAGE = 'growimage'
 COMMAND_FLYOUT = 'flyout'
 COMMAND_PULSE_IMAGE = 'pulseimage'
 COMMAND_PLAY_VIDEOS = 'playvideos'
@@ -90,6 +91,19 @@ def vertical_scroll_images_command(image_paths: list[str]):
 
 def vertical_scroll_images(image_paths: list[str]):
     return _send_marquee_command(vertical_scroll_images_command(image_paths))
+
+
+def grow_image_command(image_path: str, start_margin: float, end_margin: float, duration: float, fade: str):
+    return _make_command(COMMAND_GROW_IMAGE, {
+        'image': image_path,
+        'startmargin': start_margin,
+        'endmargin': end_margin,
+        'duration': duration,
+        'fade': fade})
+
+
+def grow_image(image_path: str, margin_start: float, margin_end: float, duration: float, fade: str):
+    return _send_marquee_command(grow_image_command(image_path, margin_start, margin_end, duration, fade))
 
 
 def show_image_command(image_path: str, margin: float):
@@ -516,6 +530,58 @@ class FlyoutEffect(Effect):
         sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
 
         if self.stopping and fade_animation_done and translate_animation_done:
+            self.stopped = True
+
+    def cleanup(self):
+        self.image.cleanup()
+
+
+class GrowImageEffect(Effect):
+    """
+    Effect for growing an image
+    """
+    def __init__(self, renderer, image_path, start_margin, end_margin, duration, fade):
+        self.margin_anim = ValueAnimation(start_margin, end_margin, duration, ease=True)
+
+        start_fade = 1.0
+        end_fade = 1.0
+        if fade == 'fadein':
+            start_fade = 0.0
+            end_fade = 1.0
+        elif fade == 'fadeout':
+            start_fade = 1.0
+            end_fade = 0.0
+
+        self.fade_anim = ValueAnimation(start_fade, end_fade, duration, ease=True)
+        _, h = _get_renderer_dimensions(renderer)
+        self.image = Image(renderer, image_path, height=h)
+        self.stopping = False
+        self.stopped = False
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+            current_value, _ = self.fade_anim.evaluate()
+            self.fade_anim = ValueAnimation(current_value, 1.0, 0.0, ease=True)
+
+    def is_stopped(self):
+        return self.stopped
+
+    def render(self, renderer):
+        rw, rh = _get_renderer_dimensions(renderer)
+
+        sw = float(self.image.width)
+        sh = float(self.image.height)
+
+        margin, _ = self.margin_anim.evaluate()
+        fade, fade_anim_done = self.fade_anim.evaluate()
+
+        dst_rect = _get_fit_rect(sw, sh, rw, rh, margin=margin)
+
+        sdl2.SDL_SetTextureAlphaMod(self.image.texture, int(fade * 255.0))
+        sdl2.SDL_RenderCopyF(renderer, self.image.texture, self.image.rect, dst_rect)
+
+        if self.stopping and fade_anim_done:
             self.stopped = True
 
     def cleanup(self):
@@ -999,7 +1065,7 @@ def _open_marquee_window(display_idx=DISPLAY_ONLY_MARQUEE):
         bounds.w, bounds.h,
         sdl2.SDL_WINDOW_BORDERLESS | sdl2.SDL_WINDOW_VULKAN)
 
-    #sdl2.SDL_SetWindowAlwaysOnTop(window, True) - this may grab focus in some cases (I think)
+    #sdl2.SDL_SetWindowAlwaysOnTop(window, True) # This may grab focus in some cases (I think)
     sdl2.SDL_ShowCursor(sdl2.SDL_DISABLE)
 
     renderer = sdl2.SDL_CreateRenderer(
@@ -1042,6 +1108,12 @@ def _process_marquee_command(command, render_manager):
         image_path = Path(args['image'])
         if image_path.is_file():
             effect = ShowImageEffect(render_manager.renderer, args['image'], args['margin'])
+            render_manager.add_effect(effect)
+
+    elif name == COMMAND_GROW_IMAGE:
+        image_path = Path(args['image'])
+        if image_path.is_file():
+            effect = GrowImageEffect(render_manager.renderer, args['image'], args['startmargin'], args['endmargin'], args['duration'], args['fade'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_FLYOUT:
