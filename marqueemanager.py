@@ -747,6 +747,9 @@ class VideoPlaybackEffect(Effect):
                 print(f'Load: {video_path}')
                 self.video, self.tex = self._load_video(renderer, video_path)
                 if self.video is None or self.tex is None:
+                    if len(self.video_paths) == 1:
+                        print('Failed to load the only video in the list, terminating effect')
+                        self.stopped = True
                     return
                 self.loaded_video_path = video_path
 
