@@ -646,7 +646,6 @@ class VideoPlaybackEffect(Effect):
         self.next_frame_idx = 0
         self.video_idx = 0
         self.loaded_video_path = None
-        self.load_next_video = True
 
         self.video = None
         self.tex = None
@@ -665,53 +664,25 @@ class VideoPlaybackEffect(Effect):
 
     def _load_video(self, renderer, video_path):
 
-        if video_path != self.loaded_video_path:
+        if not os.path.isfile(video_path):
+            return None, None
 
-            self.cleanup()
+        # Load new video
+        video = cv2.VideoCapture(video_path)
+        w = video.get(cv2.CAP_PROP_FRAME_WIDTH)
+        h = video.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-            if not os.path.isfile(video_path):
-                return False
+        # Create texture
+        tex = sdl2.SDL_CreateTexture(
+            renderer,
+            sdl2.SDL_PIXELFORMAT_ABGR32,
+            sdl2.SDL_TEXTUREACCESS_STREAMING,
+            int(w), int(h))
+        sdl2.SDL_SetTextureBlendMode(tex, sdl2.SDL_BLENDMODE_BLEND)
 
-            # Load new video
-            self.video = cv2.VideoCapture(video_path)
-            self.fps = self.video.get(cv2.CAP_PROP_FPS)
-            w = self.video.get(cv2.CAP_PROP_FRAME_WIDTH)
-            h = self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        return video, tex
 
-            # Create texture
-            self.tex = sdl2.SDL_CreateTexture(
-                renderer,
-                sdl2.SDL_PIXELFORMAT_ABGR32,
-                sdl2.SDL_TEXTUREACCESS_STREAMING,
-                int(w), int(h))
-            sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
-
-        return True
-
-
-    def render(self, renderer):
-
-        # Do we have a loaded video?
-        if self.load_next_video:
-
-            self.load_next_video = False
-
-            # Get video path
-            video_path = self.video_paths[self.video_idx]
-            self.video_idx += 1
-            self.video_idx %= len(self.video_paths)
-
-            # Load video
-
-            # TODO: Handle corner cases when _load_video returns False (e.g. what if no video is present)
-            self._load_video(renderer, video_path)
-            self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-            # Reset state
-            self.t0 = time.time()
-            self.next_frame_idx = 0
-            self.last_frame = None
-
+    def _get_frame(self):
 
         # Compute desired frame index
         dt = time.time() - self.t0
@@ -719,7 +690,7 @@ class VideoPlaybackEffect(Effect):
 
         if desired_frame_idx < self.next_frame_idx:
             # We're ahead, just re-use the last frame until we're caught up
-            frame = self.last_frame
+            return self.last_frame
 
         else:
             # We're behind, we need to read some throw-away frames to catch up
@@ -727,20 +698,16 @@ class VideoPlaybackEffect(Effect):
             for i in range(catchup_frames):
                 ret, _ = self.video.read()
                 self.next_frame_idx += 1
-                if not ret:
-                    self.load_next_video = True
-                    return
 
             # This is the frame we will use
             ret, frame = self.video.read()
             self.next_frame_idx += 1
-            if not ret:
-                self.load_next_video = True
-                return
+            return frame
 
-        # Store the last frame
-        self.last_frame = frame
-
+    def _copy_frame_to_tex(self, frame, tex):
+        """
+        Copy numpy (ndarray) to SDL texture
+        """
         # Get video frame dimensions
         w = frame.shape[1]
         h = frame.shape[0]
@@ -748,7 +715,7 @@ class VideoPlaybackEffect(Effect):
         # Copy pixels from the decoded video 'frame' to the texture
         tex_pixels_ptr = c_void_p()
         tex_pixels_pitch = c_int()
-        sdl2.SDL_LockTexture(self.tex, None, byref(tex_pixels_ptr), byref(tex_pixels_pitch))
+        sdl2.SDL_LockTexture(tex, None, byref(tex_pixels_ptr), byref(tex_pixels_pitch))
         tex_pixels = cast(tex_pixels_ptr, POINTER(c_ubyte * (tex_pixels_pitch.value * h))).contents
         bytes_per_pixel = int(tex_pixels_pitch.value / w)
         tex_pixels_ndarray = np.ndarray((h, w, bytes_per_pixel), np.uint8, buffer=tex_pixels)
@@ -759,11 +726,52 @@ class VideoPlaybackEffect(Effect):
         np.copyto(tex_pixels_ndarray[:,:,1:4], frame)
         tex_pixels_ndarray[:, :, 0] = int(255)
 
-        sdl2.SDL_UnlockTexture(self.tex)
+        sdl2.SDL_UnlockTexture(tex)
+
+    def render(self, renderer):
+
+        # When 'last_frame' is undefined, it indicates that either 1) no video has
+        # been loaded yet OR 2) a video played to completion - in either case we have
+        # to prepare the next video
+        if self.last_frame is None:
+
+            # Get video path
+            video_path = self.video_paths[self.video_idx]
+            assert video_path is not None
+            self.video_idx += 1
+            self.video_idx %= len(self.video_paths)
+
+            if video_path != self.loaded_video_path:
+                # This is a new video, load it
+                self.cleanup()
+                print(f'Load: {video_path}')
+                self.video, self.tex = self._load_video(renderer, video_path)
+                if self.video is None or self.tex is None:
+                    return
+                self.loaded_video_path = video_path
+
+            # Reset state
+            self.fps = self.video.get(cv2.CAP_PROP_FPS)
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self.t0 = time.time()
+            self.next_frame_idx = 0
+            self.fade_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
+
+        # Decode frame for current time
+        self.last_frame = self._get_frame()
+        if self.last_frame is None:
+            return
+
+        # Copy frame to texture
+        self._copy_frame_to_tex(self.last_frame, self.tex)
 
         # Set texture alpha value
         value, fade_animation_done = self.fade_anim.evaluate()
         sdl2.SDL_SetTextureAlphaMod(self.tex, int(value * self.alpha * 255.0))
+
+        # Get video frame dimensions
+        w = self.last_frame.shape[1]
+        h = self.last_frame.shape[0]
 
         # Render
         src_rect = sdl2.SDL_Rect(0, 0, w, h)
