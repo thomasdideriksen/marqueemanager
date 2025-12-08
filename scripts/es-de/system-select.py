@@ -23,8 +23,13 @@ if len(sys.argv) > 1:
 
             mm.set_background_color(0.25, 0.25, 0.25),
 
-            video_path = utils.get_random_video_path()
-            mm.play_video(video_path, 0, 0.45, 'fill'),
+            VIDEO_COUNT = 32
+            video_paths = []
+            for _ in range(VIDEO_COUNT):
+                video_paths.append(utils.get_random_video_path())
+
+            print(video_paths)
+            mm.play_videos(video_paths, 0, 0.45, 'fill'),
 
             images = utils.get_logo_paths()
             random.shuffle(images)

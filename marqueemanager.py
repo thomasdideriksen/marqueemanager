@@ -12,7 +12,7 @@ COMMAND_CLEAR = 'clear'
 COMMAND_SHOW_IMAGE = 'showimage'
 COMMAND_FLYOUT = 'flyout'
 COMMAND_PULSE_IMAGE = 'pulseimage'
-COMMAND_PLAY_VIDEO = 'playvideo'
+COMMAND_PLAY_VIDEOS = 'playvideos'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
@@ -124,16 +124,16 @@ def pulse_image(image_path: str):
     return _send_marquee_command(pulse_image_command(image_path))
 
 
-def play_video_command(video_path: str, margin: float, alpha: float, fit: str):
-    return _make_command(COMMAND_PLAY_VIDEO, {
-        'video': video_path,
+def play_videos_command(video_paths: str, margin: float, alpha: float, fit: str):
+    return _make_command(COMMAND_PLAY_VIDEOS, {
+        'videos': video_paths,
         'margin': margin,
         'alpha': alpha,
         'fit': fit})
 
 
-def play_video(video_path: str, margin: float, alpha: float, fit: str):
-    return _send_marquee_command(play_video_command(video_path, margin, alpha, fit))
+def play_videos(video_paths: str, margin: float, alpha: float, fit: str):
+    return _send_marquee_command(play_videos_command(video_paths, margin, alpha, fit))
 
 
 def set_background_color_command(r, g, b):
@@ -567,17 +567,23 @@ class VideoPlaybackEffect(Effect):
     """
     Effect for video playback
     """
-    def __init__(self, renderer, video_path, margin, alpha, fit):
+    def __init__(self, renderer, video_paths, margin, alpha, fit):
 
-        self.fit = fit
+        self.video_paths = video_paths
         self.margin = margin
         self.alpha = alpha
+        self.fit = fit
+
         self.fade_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
-        self.t0 = time.time()
+
         self.last_frame = None
         self.next_frame_idx = 0
-        self.video_path = video_path
-        self.video_loaded = False
+        self.video_idx = 0
+        self.loaded_video_path = None
+        self.load_next_video = True
+
+        self.video = None
+        self.tex = None
 
         self.stopping = False
         self.stopped = False
@@ -591,23 +597,55 @@ class VideoPlaybackEffect(Effect):
     def is_stopped(self):
         return self.stopped
 
-    def reset_video(self):
-        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-        self.t0 = time.time()
-        self.next_frame_idx = 0
+    def _load_video(self, renderer, video_path):
 
-    def render(self, renderer):
+        if video_path != self.loaded_video_path:
 
-        # Load video on demand
-        if not self.video_loaded:
-            self.video = cv2.VideoCapture(self.video_path)
+            self.cleanup()
+
+            if not os.path.isfile(video_path):
+                return False
+
+            # Load new video
+            self.video = cv2.VideoCapture(video_path)
             self.fps = self.video.get(cv2.CAP_PROP_FPS)
             w = self.video.get(cv2.CAP_PROP_FRAME_WIDTH)
             h = self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-            self.surface = sdl2.SDL_CreateRGBSurface(0, int(w), int(h), 24, 0, 0, 0, 0)
-            self.surface_access = sdl2.ext.pixelaccess.pixels3d(self.surface, transpose=False)
-            self.video_loaded = True
+            # Create texture
+            self.tex = sdl2.SDL_CreateTexture(
+                renderer,
+                sdl2.SDL_PIXELFORMAT_ABGR32,
+                sdl2.SDL_TEXTUREACCESS_STREAMING,
+                int(w), int(h))
+            sdl2.SDL_SetTextureBlendMode(self.tex, sdl2.SDL_BLENDMODE_BLEND)
+
+        return True
+
+
+    def render(self, renderer):
+
+        # Do we have a loaded video?
+        if self.load_next_video:
+
+            self.load_next_video = False
+
+            # Get video path
+            video_path = self.video_paths[self.video_idx]
+            self.video_idx += 1
+            self.video_idx %= len(self.video_paths)
+
+            # Load video
+
+            # TODO: Handle corner cases when _load_video returns False (e.g. what if no video is present)
+            self._load_video(renderer, video_path)
+            self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+            # Reset state
+            self.t0 = time.time()
+            self.next_frame_idx = 0
+            self.last_frame = None
+
 
         # Compute desired frame index
         dt = time.time() - self.t0
@@ -624,56 +662,66 @@ class VideoPlaybackEffect(Effect):
                 ret, _ = self.video.read()
                 self.next_frame_idx += 1
                 if not ret:
-                    self.reset_video()
+                    self.load_next_video = True
                     return
 
             # This is the frame we will use
             ret, frame = self.video.read()
             self.next_frame_idx += 1
             if not ret:
-                self.reset_video()
+                self.load_next_video = True
                 return
 
         # Store the last frame
         self.last_frame = frame
 
-        # Copy frame to surface
-        np.copyto(self.surface_access, frame)
+        # Get video frame dimensions
+        w = frame.shape[1]
+        h = frame.shape[0]
 
-        # Make texture from surface
-        tex = sdl2.SDL_CreateTextureFromSurface(renderer, self.surface)
-        sdl2.SDL_SetTextureBlendMode(tex, sdl2.SDL_BLENDMODE_BLEND)
+        # Copy pixels from the decoded video 'frame' to the texture
+        tex_pixels_ptr = c_void_p()
+        tex_pixels_pitch = c_int()
+        sdl2.SDL_LockTexture(self.tex, None, byref(tex_pixels_ptr), byref(tex_pixels_pitch))
+        tex_pixels = cast(tex_pixels_ptr, POINTER(c_ubyte * (tex_pixels_pitch.value * h))).contents
+        bytes_per_pixel = int(tex_pixels_pitch.value / w)
+        tex_pixels_ndarray = np.ndarray((h, w, bytes_per_pixel), np.uint8, buffer=tex_pixels)
+
+        # TODO:
+        # Figure out why '/home/thomas/ES-DE/downloaded_media/snes/videos/Spot Goes to Hollywood (USA) (Proto).mp4' is broken when
+        # using 3-channel textures. Using 4-channel textures seems to fix it, but requires some extra work as seen below.
+        np.copyto(tex_pixels_ndarray[:,:,1:4], frame)
+        tex_pixels_ndarray[:, :, 0] = int(255)
+
+        sdl2.SDL_UnlockTexture(self.tex)
 
         # Set texture alpha value
         value, fade_animation_done = self.fade_anim.evaluate()
-        sdl2.SDL_SetTextureAlphaMod(tex, int(value * self.alpha * 255.0))
-
-        # Source rect
-        w = self.last_frame.shape[1]
-        h = self.last_frame.shape[0]
-        src_rect = sdl2.SDL_Rect(0, 0, w, h)
-
-        # Destination rect
-        rw, rh = _get_renderer_dimensions(renderer)
-        dst_rect = _get_fit_rect(w, h, rw, rh, fit=self.fit, margin=self.margin)
+        sdl2.SDL_SetTextureAlphaMod(self.tex, int(value * self.alpha * 255.0))
 
         # Render
+        src_rect = sdl2.SDL_Rect(0, 0, w, h)
+        rw, rh = _get_renderer_dimensions(renderer)
+        dst_rect = _get_fit_rect(w, h, rw, rh, fit=self.fit, margin=self.margin)
         sdl2.SDL_RenderCopyF(
             renderer,
-            tex,
+            self.tex,
             src_rect,
             dst_rect)
 
-        # Cleanup texture
-        sdl2.SDL_DestroyTexture(tex)
-
+        # Handle effect termination
         if self.stopping and fade_animation_done:
             self.stopped = True
 
     def cleanup(self):
-        #self.video.close()
-        self.video.release()
-        sdl2.SDL_FreeSurface(self.surface)
+        if self.video is not None:
+            #self.video.close()
+            self.video.release()
+            self.video = None
+
+        if self.tex is not None:
+            sdl2.SDL_DestroyTexture(self.tex)
+            self.tex = None
 
 
 class PulseImageEffect(Effect):
@@ -1030,10 +1078,9 @@ def _process_marquee_command(command, render_manager):
         color = list(args['color'])
         render_manager.set_background_color(*color)
 
-    elif name == COMMAND_PLAY_VIDEO:
-        if Path(args['video']).is_file():
-            effect = VideoPlaybackEffect(render_manager.renderer, args['video'], args['margin'], args['alpha'], args['fit'])
-            render_manager.add_effect(effect)
+    elif name == COMMAND_PLAY_VIDEOS:
+        effect = VideoPlaybackEffect(render_manager.renderer, args['videos'], args['margin'], args['alpha'], args['fit'])
+        render_manager.add_effect(effect)
 
     elif name == COMMAND_CLEAR:
         render_manager.stop_all_effects()
@@ -1228,7 +1275,7 @@ if __name__ == "__main__":
     import sdl2
     import sdl2.ext
     from sdl2.ext.err import SDLError
-    from ctypes import c_int, byref
+    from ctypes import c_int, c_ubyte, c_void_p, byref, cast, POINTER, pythonapi, py_object
     from threading import Thread, Event
     from queue import Queue, Empty
     from multiprocessing.connection import Listener
