@@ -1,7 +1,7 @@
 import sys
 import os
 import random
-import glob
+from pathlib import Path
 
 MM_ROOT = '/home/thomas/Arcade/marqueemanager'
 ES_ROOT = '/home/thomas/ES-DE'
@@ -60,14 +60,19 @@ def get_video_folder_for(system):
     return os.path.join(ES_ROOT, DOWNLOADED_MEDIA, system, 'videos')
 
 
-def get_random_video_path(system=None):
+def get_random_video_paths(system=None, count=1):
+    folder = None
     if system is None:
-        systems = get_systems()
-        system = random.choice(systems)
-    video_folder = get_video_folder_for(system)
-    videos = glob.glob('*.mp4', root_dir=video_folder)
-    result = os.path.join(video_folder, random.choice(videos))
-    return _clean_path(result)
+        folder = os.path.join(ES_ROOT, DOWNLOADED_MEDIA)
+    else:
+        folder = get_video_folder_for(system)
+    all = []
+    for file in Path(folder).rglob('*.mp4'):
+        full_path = _clean_path(os.path.join(folder, file))
+        all.append(full_path)
+    random.shuffle(all)
+    result = all[0:count]
+    return result
 
 
 def get_logo_paths():
