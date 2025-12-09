@@ -29,7 +29,7 @@ if len(sys.argv) > 1:
 
             logo_images = utils.get_logo_paths()
             random.shuffle(logo_images)
-            mm.horizontal_scroll_images(logo_images, 180, True, 120, 80)
+            mm.horizontal_scroll_images(logo_images, 180, True, 120, 80, svg_aa_factor=0.6)
 
             info_img_path = os.path.join(utils.get_graphics_folder(), 'buttons_main_flattened.svg')
             mm.flyout(info_img_path, 0.6, 0.45, 8, 3)

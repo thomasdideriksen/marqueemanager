@@ -72,16 +72,17 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
             time.sleep(0.1)
 
 
-def horizontal_scroll_images_command(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
+def horizontal_scroll_images_command(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float, svg_aa_factor: float):
     return _make_command(COMMAND_HORZ_SCROLL_IMAGES, {
         'images': image_paths,
         'speed': speed,
         'reverse': reverse,
         'margin': margin,
-        'spacing': spacing})
+        'spacing': spacing,
+        'svgaafactor': svg_aa_factor})
 
-def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float):
-    return _send_marquee_command(horizontal_scroll_images_command(image_paths, speed, reverse, margin, spacing))
+def horizontal_scroll_images(image_paths: list[str], speed: float, reverse: bool, margin: float, spacing: float, svg_aa_factor: float):
+    return _send_marquee_command(horizontal_scroll_images_command(image_paths, speed, reverse, margin, spacing, svg_aa_factor))
 
 
 def vertical_scroll_images_command(image_paths: list[str]):
@@ -417,11 +418,11 @@ class Image(object):
     """
     Small wrapper class for images
     """
-    def __init__(self, renderer, path, height=0, width=0):
+    def __init__(self, renderer, path, height=0, width=0, svg_aa_factor=1):
 
         MAX_DIM = 8192
         if path.lower().endswith('.svg'):
-            self.surface = sdl2.ext.image.load_svg(path, int(width), int(height), as_argb=True)
+            self.surface = sdl2.ext.image.load_svg(path, int(width * svg_aa_factor), int(height * svg_aa_factor), as_argb=True)
             # Don't exceed max allowed texture size
             if self.surface.w > MAX_DIM or self.surface.h > MAX_DIM:
                 sx = MAX_DIM / float(self.surface.w)
@@ -863,14 +864,14 @@ class HorizontalScrollImagesEffect(Effect):
     """
     Horizontal image scrolling effect
     """
-    def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False, margin=8, spacing=64):
+    def __init__(self, renderer, image_paths, pixels_per_second=400, reverse=False, margin=8, spacing=64, svg_aa_factor=1):
 
         rw, rh = _get_renderer_dimensions(renderer)
 
         self.margin = margin
         self.spacing = spacing
 
-        self.images = [Image(renderer, path, height=rh) for path in image_paths]
+        self.images = [Image(renderer, path, height=rh, svg_aa_factor=svg_aa_factor) for path in image_paths]
         self.animations = []
         self.rects = []
         self.full_width = 0.0
@@ -1146,7 +1147,8 @@ def _process_marquee_command(command, render_manager):
                 args['speed'],
                 args['reverse'],
                 args['margin'],
-                args['spacing'])
+                args['spacing'],
+                args['svgaafactor'])
             render_manager.add_effect(effect)
 
     elif name == COMMAND_VERT_SCROLL_IMAGES:
