@@ -139,16 +139,17 @@ def pulse_image(image_path: str):
     return _send_marquee_command(pulse_image_command(image_path))
 
 
-def play_videos_command(video_paths: str, margin: float, alpha: float, fit: str):
+def play_videos_command(video_paths: str, margin: float, alpha: float, fit: str, delay: float):
     return _make_command(COMMAND_PLAY_VIDEOS, {
         'videos': video_paths,
         'margin': margin,
         'alpha': alpha,
-        'fit': fit})
+        'fit': fit,
+        'delay': delay})
 
 
-def play_videos(video_paths: str, margin: float, alpha: float, fit: str):
-    return _send_marquee_command(play_videos_command(video_paths, margin, alpha, fit))
+def play_videos(video_paths: str, margin: float, alpha: float, fit: str, delay: float):
+    return _send_marquee_command(play_videos_command(video_paths, margin, alpha, fit, delay))
 
 
 def set_background_color_command(r, g, b):
@@ -634,19 +635,22 @@ class VideoPlaybackEffect(Effect):
     """
     Effect for video playback
     """
-    def __init__(self, renderer, video_paths, margin, alpha, fit):
+    def __init__(self, renderer, video_paths, margin, alpha, fit, delay):
 
         self.video_paths = video_paths
         self.margin = margin
         self.alpha = alpha
         self.fit = fit
+        self.delay = delay
 
-        self.fade_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
+        self.fade_anim = ValueAnimation(0.0, 0.0, 0.0, ease=True)
 
         self.last_frame = None
         self.next_frame_idx = 0
         self.video_idx = 0
         self.loaded_video_path = None
+        self.creation_time = time.time()
+        self.awaiting_first_playback = True
 
         self.video = None
         self.tex = None
@@ -731,6 +735,22 @@ class VideoPlaybackEffect(Effect):
 
     def render(self, renderer):
 
+        # Here, depending on the 'delay' parameter', we wait before starting playback of the first video (i.e. a one-time
+        # thing). The purpose of this is to avoid having to load videos unnecessarily if the effect is rapidly stopped, such as
+        # when a user scrolls quickly through the game library
+        if self.awaiting_first_playback:
+            time_since_creation = time.time() - self.creation_time
+            if time_since_creation < self.delay:
+                # ... we haven't yet exceeded the specified delay. Nothing to do, except checking if the framework attempted
+                # to stop the effect.
+                if self.stopping:
+                    self.stopped = True
+                return
+            else:
+                # ... we're OK to start playback. Kick off the fade-in animation
+                self.fade_anim = ValueAnimation(0.0, 1.0, 1.0, ease=True)
+                self.awaiting_first_playback = False
+
         # When 'last_frame' is undefined, it indicates that either 1) no video has
         # been loaded yet OR 2) a video played to completion - in either case we have
         # to prepare the next video
@@ -745,6 +765,7 @@ class VideoPlaybackEffect(Effect):
             if video_path != self.loaded_video_path:
                 # This is a new video, load it
                 self.cleanup()
+                print(f'Loading: {video_path}')
                 self.video, self.tex = self._load_video(renderer, video_path)
                 if self.video is None or self.tex is None:
                     if len(self.video_paths) == 1:
@@ -1163,7 +1184,7 @@ def _process_marquee_command(command, render_manager):
         render_manager.set_background_color(*color)
 
     elif name == COMMAND_PLAY_VIDEOS:
-        effect = VideoPlaybackEffect(render_manager.renderer, args['videos'], args['margin'], args['alpha'], args['fit'])
+        effect = VideoPlaybackEffect(render_manager.renderer, args['videos'], args['margin'], args['alpha'], args['fit'], args['delay'])
         render_manager.add_effect(effect)
 
     elif name == COMMAND_CLEAR:

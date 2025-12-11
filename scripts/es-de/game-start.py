@@ -19,7 +19,7 @@ if mm.start_marquee() >= 0:
     rom_name = utils.rom_name_from_rom_path(rom_path)
 
     video_path = utils.get_video_path_for(rom_system, rom_name)
-    mm.play_videos([video_path], 0, 0.45, 'fill')
+    mm.play_videos([video_path], 0, 0.45, 'fill', 0)
 
     marquee_image_path = utils.get_marquee_image_path_for(rom_system, rom_name)
 

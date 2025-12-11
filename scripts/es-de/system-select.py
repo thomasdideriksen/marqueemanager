@@ -25,7 +25,7 @@ if len(sys.argv) > 1:
             VIDEO_COUNT = 48
             # Note: Pick video from the 'neogeo' system because they generally look attractive
             video_paths = utils.get_random_video_paths(system='neogeo', count=VIDEO_COUNT)
-            mm.play_videos(video_paths, 0, 0.45, 'fill'),
+            mm.play_videos(video_paths, 0, 0.45, 'fill', 0),
 
             logo_images = utils.get_logo_paths()
             random.shuffle(logo_images)

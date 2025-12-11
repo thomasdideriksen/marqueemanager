@@ -26,7 +26,7 @@ if len(sys.argv) > 1:
         mm.command_list([
             mm.clear_command(),
             mm.set_background_color_command(0.25, 0.25, 0.25),
-            mm.play_videos_command([video_path], 0, 0.45, 'fill'),
+            mm.play_videos_command([video_path], 0, 0.45, 'fill', 0.25),
             mm.show_image_command(marquee_image_path, 64),
             mm.flyout_command(info_img_path, 0.6, 0.45, 8, 1.5),
         ])
