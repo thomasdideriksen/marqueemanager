@@ -765,7 +765,6 @@ class VideoPlaybackEffect(Effect):
             if video_path != self.loaded_video_path:
                 # This is a new video, load it
                 self.cleanup()
-                print(f'Loading: {video_path}')
                 self.video, self.tex = self._load_video(renderer, video_path)
                 if self.video is None or self.tex is None:
                     if len(self.video_paths) == 1:
