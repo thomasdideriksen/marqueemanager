@@ -17,6 +17,7 @@ COMMAND_PLAY_VIDEOS = 'playvideos'
 COMMAND_HORZ_SCROLL_IMAGES = 'horzscrollimages'
 COMMAND_VERT_SCROLL_IMAGES = 'vertscrollimages'
 COMMAND_BACKGROUND = 'background'
+COMMAND_CPU_USAGE_VISUALIZATION = 'cpuusagevisualization'
 COMMAND_SET_STATE = 'setstate'
 COMMAND_GET_STATE = 'getstate'
 COMMAND_COMMAND_LIST = 'commandlist'
@@ -137,6 +138,14 @@ def pulse_image_command(image_path: str):
 
 def pulse_image(image_path: str):
     return _send_marquee_command(pulse_image_command(image_path))
+
+
+def cpu_usage_visualization_command():
+    return _make_command(COMMAND_CPU_USAGE_VISUALIZATION, {})
+
+
+def cpu_usage_visualization():
+    _send_marquee_command(cpu_usage_visualization_command())
 
 
 def play_videos_command(video_paths: str, margin: float, alpha: float, fit: str, delay: float):
@@ -963,6 +972,121 @@ class HorizontalScrollImagesEffect(Effect):
             image.cleanup()
 
 
+class CpuUsageVisualizationEffect(Effect):
+    """
+    CPU Usage Visualization effect
+    """
+    def __init__(self, renderer):
+
+        self.stopping = False
+        self.stopped = False
+        self.cpu_usage = None
+        self.prev_cpu_usage = None
+
+        self.thread = Thread(
+            target=self._thread_func,
+            name='CPU usage measure thread',
+            daemon=True)
+        self.thread.start()
+
+        self.cpu_usage_anim = ValueAnimation(0, 0)
+
+    def _thread_func(self):
+
+        prev_total = {}
+        prev_idle = {}
+        util = {}
+        sample_count = 0
+
+        with open('/proc/stat', 'r') as f:
+
+            while not self.stopping:
+
+                f.seek(0)
+                for line in f:
+                    if line.startswith('cpu'):
+
+                        arr = line.split()
+                        key = arr[0]
+
+                        # Compute cumulative total + idle
+                        all = [float(v) for v in arr[1:]]
+                        IDLE_INDEX = 3
+                        idle = all[IDLE_INDEX]
+                        total = sum(all)
+
+                        # Init utilization array for CPU
+                        if not key in util:
+                            util[key] = []
+
+                        # Compute immediate total + idle (delta)
+                        if key in prev_total:
+                            delta_idle = idle - prev_idle[key]
+                            delta_total = total - prev_total[key]
+                            util[key].append(1.0 - (float(delta_idle) / float(delta_total)) if delta_total > 0 else 0.0)
+
+                        # Store previous cumulative total + idle
+                        prev_total[key] = total
+                        prev_idle[key] = idle
+
+                sample_count += 1
+
+                # Compute the average every once in a while
+                SAMPLES_FOR_AVERAGE = 10
+                if sample_count >= SAMPLES_FOR_AVERAGE:
+                    sample_count = 0
+                    avg = {}
+                    for key in util.keys():
+                        avg[key] = float(sum(util[key])) / float(len(util[key]))
+                        util[key] = []
+
+                    # Store result
+                    self.cpu_usage = avg['cpu']
+
+                SAMPLE_TO_SAMPLE_DELAY = 0.05
+                time.sleep(SAMPLE_TO_SAMPLE_DELAY)
+
+    def render(self, renderer):
+
+        # Make a copy of 'self.cpu_usage', since that value may be changed by the measure thread at any time
+        local_cpu_usage = self.cpu_usage
+
+        if local_cpu_usage is not None:
+
+            if local_cpu_usage != self.prev_cpu_usage:
+                self.prev_cpu_usage = local_cpu_usage
+                curr_cpu_usage, _ = self.cpu_usage_anim.evaluate()
+                self.cpu_usage_anim = ValueAnimation(curr_cpu_usage, local_cpu_usage, duration=0.35, ease=False)
+
+            X = 8
+            Y = 8
+            W = 160
+            H = 4
+
+            sdl2.SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
+            rect = sdl2.SDL_FRect(x=X, y=Y, w=W, h=H)
+            sdl2.SDL_RenderFillRectF(renderer, rect)
+
+            sdl2.SDL_SetRenderDrawColor(renderer, 12, 149, 255, 255)
+            animated_cpu_usage, _ = self.cpu_usage_anim.evaluate()
+            rect = sdl2.SDL_FRect(x=X, y=Y, w=animated_cpu_usage * W, h=H)
+            sdl2.SDL_RenderFillRectF(renderer, rect)
+
+        if self.stopping:
+            self.thread.join(timeout=0)
+            self.stopped = not self.thread.is_alive()
+
+    def stop(self):
+        if not self.stopping:
+            self.stopping = True
+
+    def is_stopped(self):
+        return self.stopped
+
+    def cleanup(self):
+        pass
+
+
 class VerticalScrollImagesEffect(Effect):
     """
     Vertical image scrolling effect
@@ -1186,6 +1310,10 @@ def _process_marquee_command(command, render_manager):
         effect = VideoPlaybackEffect(render_manager.renderer, args['videos'], args['margin'], args['alpha'], args['fit'], args['delay'])
         render_manager.add_effect(effect)
 
+    elif name == COMMAND_CPU_USAGE_VISUALIZATION:
+        effect = CpuUsageVisualizationEffect(render_manager.renderer)
+        render_manager.add_effect(effect)
+
     elif name == COMMAND_CLEAR:
         render_manager.stop_all_effects()
 
@@ -1295,6 +1423,7 @@ class RenderManager(object):
             effect.render(self.renderer)
 
             # Note: Prune oldest effects if we exceed the max allowed limit
+            # TODO: Consider only pruning video-playback effects
             prune_effect = len(self.effects) > self.max_effects_count and idx < len(self.effects) - self.max_effects_count
 
             if effect.is_stopped() or prune_effect:
