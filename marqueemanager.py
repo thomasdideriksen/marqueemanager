@@ -50,8 +50,7 @@ def start_marquee(display_idx=DISPLAY_ONLY_MARQUEE):
     flags = subprocess.DETACHED_PROCESS if os.name == 'nt' else 0
     process = subprocess.Popen(
         [sys.executable, __file__, str(display_idx)],
-        creationflags=flags,
-        stdout=subprocess.PIPE)
+        creationflags=flags)
 
     # Wait for the marquee process/window to be ready
     t0 = time.time()
